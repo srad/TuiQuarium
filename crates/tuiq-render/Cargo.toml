@@ -1,0 +1,11 @@
+[package]
+name = "tuiq-render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tuiq-core = { path = "../tuiq-core" }
+ratatui = "0.29"
+
+[dev-dependencies]
+rand = "0.10.0"
