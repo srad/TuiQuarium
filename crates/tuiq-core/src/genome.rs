@@ -1,5 +1,16 @@
-//! Creature genome: the evolvable blueprint for appearance, animation, and behavior.
+//! Creature and plant genomes: evolvable blueprints for all organisms.
 //! All genes are continuous floats — no discrete enums. Mutations are always gradual.
+//!
+//! # Creature genome
+//! 35+ genes controlling body plan, appendages, behavior, and NEAT brain topology.
+//!
+//! # Plant genome
+//! 16 genes controlling morphology and physiology, informed by ecological theory:
+//! - L-systems (Lindenmayer, 1968): branching and curvature → visual shape
+//! - Allometric scaling (Kleiber, 1947): metabolism ∝ mass^0.75
+//! - Beer–Lambert law: photosynthesis via Leaf Area Index (LAI)
+//! - Grime's C-S-R Triangle (1977): Competitor/Stress-tolerator/Ruderal strategies
+//! - r/K selection (MacArthur & Wilson, 1967): seed count vs seed size trade-off
 
 use rand::Rng;
 use rand::RngExt;
@@ -224,6 +235,177 @@ impl CreatureGenome {
     }
 }
 
+// ============================================================
+// Plant genome — evolvable blueprint for plant morphology and physiology.
+// Plants are sessile producers: no brain, no animation, no movement.
+//
+// Ecological foundations (see README.md § References for full citations):
+//
+//   - Allometric scaling (Kleiber, 1947):
+//     Kleiber, M. "Body Size and Metabolic Rate." Physiological Reviews, 27(4), 511–541.
+//     Metabolism ∝ mass^0.75. Used for plant maintenance cost calculation.
+//
+//   - Leaf Area Index / Beer–Lambert law:
+//     Photosynthesis = Pmax·(1 − e^(−c·LAI)). LAI is a proxy for canopy light
+//     interception. High leaf_area gene → higher LAI → more photosynthesis with
+//     diminishing returns.
+//
+//   - Grime's C-S-R Triangle (Grime, 1977):
+//     Grime, J.P. "Evidence for the Existence of Three Primary Strategies in Plants."
+//     The American Naturalist, 111(982), 1169–1194.
+//     Competitor (high photosynthesis_rate) / Stress-tolerator (high hardiness) /
+//     Ruderal (high seed_count) strategies emerge from gene trade-offs.
+//
+//   - r/K selection (MacArthur & Wilson, 1967):
+//     MacArthur, R.H. & Wilson, E.O. "The Theory of Island Biogeography."
+//     Princeton University Press.
+//     seed_count (r-strategy) trades off with seed_size (K-strategy).
+//
+//   - L-systems (Lindenmayer, 1968):
+//     Lindenmayer, A. "Mathematical Models for Cellular Interaction in Development."
+//     Journal of Theoretical Biology, 18(3), 280–315.
+//     Branching and curvature genes parameterize production rules for
+//     procedural plant ASCII art: F → F[+F][-F].
+// ============================================================
+
+/// The complete genome for a plant — drives appearance and physiology.
+#[derive(Debug, Clone)]
+pub struct PlantGenome {
+    // ── Morphology (L-system parameters) ───────────────────────
+    /// Stem thickness: 0.0 = thin stalk, 1.0 = thick trunk.
+    /// Contributes to allometric plant mass calculation.
+    pub stem_thickness: f32,
+    /// Height factor: 0.0 = short ground cover, 1.0 = tall growth.
+    /// Taller plants intercept more light but cost more to maintain.
+    pub height_factor: f32,
+    /// Leaf area (LAI proxy): 0.0 = bare/sparse, 1.0 = dense canopy.
+    /// Light interception follows Beer-Lambert: P = Pmax·(1 − e^(−c·LAI)).
+    /// High LAI captures more light but with diminishing returns.
+    pub leaf_area: f32,
+    /// Branching tendency: 0.0 = single stem, 1.0 = bushy.
+    /// L-system branching probability: P(F → F[+F][-F]).
+    pub branching: f32,
+    /// Curvature: 0.0 = rigid/straight, 1.0 = wavy/flowing.
+    /// L-system turning angle for branches.
+    pub curvature: f32,
+    /// Primary hue (0.0–1.0, mapped to green/brown/red palette).
+    pub primary_hue: f32,
+
+    // ── Physiology (ecological trade-offs) ─────────────────────
+    /// Photosynthesis efficiency (0.5–2.0): rate of light → energy conversion.
+    /// Grime's C-axis: high = Competitor strategy.
+    pub photosynthesis_rate: f32,
+    /// Max energy storage factor (0.5–2.0): scales base energy capacity.
+    pub max_energy_factor: f32,
+    /// Hardiness (0.0–1.0): resistance to nighttime/low-light stress.
+    /// Grime's S-axis: high = Stress-tolerator strategy.
+    pub hardiness: f32,
+    /// Seed dispersal range factor (0.5–2.0): how far seeds travel.
+    pub seed_range: f32,
+    /// Seed count factor (0.3–2.0): number of seeding attempts per cycle.
+    /// r-strategy: many cheap seeds. Trades off with seed_size.
+    pub seed_count: f32,
+    /// Seed size factor (0.3–2.0): investment per seed (offspring starting energy).
+    /// K-strategy: few costly seeds. Trades off with seed_count.
+    pub seed_size: f32,
+    /// Lifespan factor (0.5–2.0): scales base lifespan.
+    pub lifespan_factor: f32,
+    /// Nutritional value (0.3–1.5): palatability to grazers.
+    pub nutritional_value: f32,
+
+    // ── Evolution tracking ─────────────────────────────────────
+    /// Master complexity gate (0.0–1.0): controls visual tier and efficiency.
+    pub complexity: f32,
+    /// Generation number.
+    pub generation: u32,
+    /// Mutation rate factor (0.5–2.0): meta-evolution of evolvability.
+    pub mutation_rate_factor: f32,
+}
+
+impl PlantGenome {
+    /// Create a fully random plant genome.
+    pub fn random(rng: &mut impl rand::Rng) -> Self {
+        use rand::RngExt;
+        Self {
+            stem_thickness: rng.random_range(0.0..1.0_f32),
+            height_factor: rng.random_range(0.0..1.0_f32),
+            leaf_area: rng.random_range(0.0..1.0_f32),
+            branching: rng.random_range(0.0..1.0_f32),
+            curvature: rng.random_range(0.0..1.0_f32),
+            primary_hue: rng.random_range(0.0..1.0_f32),
+            photosynthesis_rate: rng.random_range(0.5..2.0_f32),
+            max_energy_factor: rng.random_range(0.5..2.0_f32),
+            hardiness: rng.random_range(0.0..1.0_f32),
+            seed_range: rng.random_range(0.5..2.0_f32),
+            seed_count: rng.random_range(0.3..2.0_f32),
+            seed_size: rng.random_range(0.3..2.0_f32),
+            lifespan_factor: rng.random_range(0.5..2.0_f32),
+            nutritional_value: rng.random_range(0.3..1.5_f32),
+            complexity: rng.random_range(0.0..1.0_f32),
+            generation: 0,
+            mutation_rate_factor: rng.random_range(0.5..2.0_f32),
+        }
+    }
+
+    /// Create a minimal primordial plant — simple, small, typical parameters.
+    pub fn minimal_plant(rng: &mut impl rand::Rng) -> Self {
+        use rand::RngExt;
+        Self {
+            stem_thickness: rng.random_range(0.2..0.6_f32),
+            height_factor: rng.random_range(0.3..0.7_f32),
+            leaf_area: rng.random_range(0.3..0.7_f32),
+            branching: rng.random_range(0.1..0.5_f32),
+            curvature: rng.random_range(0.1..0.6_f32),
+            primary_hue: rng.random_range(0.0..1.0_f32),
+            photosynthesis_rate: rng.random_range(0.8..1.2_f32),
+            max_energy_factor: rng.random_range(0.8..1.2_f32),
+            hardiness: rng.random_range(0.2..0.5_f32),
+            seed_range: rng.random_range(0.6..1.2_f32),
+            seed_count: rng.random_range(0.4..0.8_f32),
+            seed_size: rng.random_range(0.4..0.8_f32),
+            lifespan_factor: rng.random_range(0.8..1.2_f32),
+            nutritional_value: rng.random_range(0.5..1.0_f32),
+            complexity: rng.random_range(0.15..0.4_f32),
+            generation: 0,
+            mutation_rate_factor: rng.random_range(0.8..1.2_f32),
+        }
+    }
+
+    /// Allometric plant mass from morphology genes.
+    /// Mass = stem_thickness × height_factor × scale.
+    /// Used for metabolism scaling (Kleiber's law: rate ∝ mass^0.75).
+    pub fn plant_mass(&self) -> f32 {
+        let base = self.stem_thickness * 0.5 + 0.1;
+        let height = self.height_factor * 0.8 + 0.2;
+        base * height
+    }
+
+    /// Effective leaf area index for photosynthesis calculation.
+    /// Higher leaf_area and branching means more light interception,
+    /// but follows Beer-Lambert law with diminishing returns.
+    pub fn effective_lai(&self) -> f32 {
+        self.leaf_area * (1.0 + self.branching * 0.5) * (0.5 + self.height_factor * 0.5)
+    }
+
+    /// Map primary_hue to a color palette index for plant rendering.
+    /// Plants use a range of greens, yellow-green, teal, and brown.
+    pub fn color_index(&self) -> u8 {
+        if self.primary_hue < 0.2 {
+            5  // Green
+        } else if self.primary_hue < 0.4 {
+            8  // Dark green (new palette entry)
+        } else if self.primary_hue < 0.55 {
+            9  // Yellow-green / lime (new palette entry)
+        } else if self.primary_hue < 0.7 {
+            10 // Teal / sea green (new palette entry)
+        } else if self.primary_hue < 0.85 {
+            6  // Orange / brown
+        } else {
+            11 // Red-brown / rust (new palette entry)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,5 +463,78 @@ mod tests {
         assert_eq!(art.color_index(), 4);
         art.primary_hue = 0.99;
         assert_eq!(art.color_index(), 7);
+    }
+
+    #[test]
+    fn test_plant_genome_random_in_range() {
+        let mut rng = rand::rng();
+        for _ in 0..200 {
+            let g = PlantGenome::random(&mut rng);
+            assert!(g.stem_thickness >= 0.0 && g.stem_thickness <= 1.0);
+            assert!(g.height_factor >= 0.0 && g.height_factor <= 1.0);
+            assert!(g.leaf_area >= 0.0 && g.leaf_area <= 1.0);
+            assert!(g.photosynthesis_rate >= 0.5 && g.photosynthesis_rate <= 2.0);
+            assert!(g.complexity >= 0.0 && g.complexity <= 1.0);
+            assert!(g.seed_count >= 0.3 && g.seed_count <= 2.0);
+            assert!(g.seed_size >= 0.3 && g.seed_size <= 2.0);
+            assert!(g.lifespan_factor >= 0.5 && g.lifespan_factor <= 2.0);
+        }
+    }
+
+    #[test]
+    fn test_minimal_plant_is_simple() {
+        let mut rng = rand::rng();
+        for _ in 0..100 {
+            let g = PlantGenome::minimal_plant(&mut rng);
+            assert!(g.complexity <= 0.4, "Minimal plant complexity should be moderate");
+            assert!(g.generation == 0);
+            assert!(g.branching <= 0.5);
+            assert!(g.plant_mass() > 0.0, "Plant mass should be positive");
+            assert!(g.effective_lai() > 0.0, "LAI should be positive");
+        }
+    }
+
+    #[test]
+    fn test_plant_color_index() {
+        let mut rng = rand::rng();
+        let mut g = PlantGenome::minimal_plant(&mut rng);
+        g.primary_hue = 0.1;
+        assert_eq!(g.color_index(), 5);  // green
+        g.primary_hue = 0.3;
+        assert_eq!(g.color_index(), 8);  // dark green
+        g.primary_hue = 0.5;
+        assert_eq!(g.color_index(), 9);  // yellow-green
+        g.primary_hue = 0.65;
+        assert_eq!(g.color_index(), 10); // teal
+        g.primary_hue = 0.75;
+        assert_eq!(g.color_index(), 6);  // orange/brown
+        g.primary_hue = 0.9;
+        assert_eq!(g.color_index(), 11); // rust brown
+    }
+
+    #[test]
+    fn test_plant_allometric_mass() {
+        let mut rng = rand::rng();
+        let mut small = PlantGenome::minimal_plant(&mut rng);
+        small.stem_thickness = 0.1;
+        small.height_factor = 0.2;
+        let mut large = small.clone();
+        large.stem_thickness = 0.9;
+        large.height_factor = 0.9;
+        assert!(large.plant_mass() > small.plant_mass(),
+            "Larger plant should have more mass: {} vs {}", large.plant_mass(), small.plant_mass());
+    }
+
+    #[test]
+    fn test_plant_lai_increases_with_leaf_area() {
+        let mut rng = rand::rng();
+        let mut sparse = PlantGenome::minimal_plant(&mut rng);
+        sparse.leaf_area = 0.1;
+        sparse.branching = 0.0;
+        let mut dense = sparse.clone();
+        dense.leaf_area = 0.9;
+        dense.branching = 0.8;
+        assert!(dense.effective_lai() > sparse.effective_lai(),
+            "Dense plant should have higher LAI");
     }
 }

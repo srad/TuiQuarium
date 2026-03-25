@@ -102,9 +102,13 @@ fn creature_color(color_index: u8) -> Color {
         2 => Color::White,        // Angelfish
         3 => Color::LightMagenta, // Jellyfish
         4 => Color::LightRed,     // Crab
-        5 => Color::Green,        // Seaweed
-        6 => Color::Rgb(255, 165, 0), // Orange
+        5 => Color::Green,        // Seaweed / plant green
+        6 => Color::Rgb(255, 165, 0), // Orange / plant brown
         7 => Color::Rgb(200, 100, 200), // Purple
+        8 => Color::Rgb(0, 120, 60),    // Dark green (plants)
+        9 => Color::Rgb(180, 220, 40),  // Yellow-green / lime (plants)
+        10 => Color::Rgb(0, 180, 140),  // Teal / sea green (plants)
+        11 => Color::Rgb(160, 82, 45),  // Sienna / rust brown (plants)
         _ => Color::White,
     }
 }

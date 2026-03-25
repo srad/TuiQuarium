@@ -125,6 +125,50 @@ pub fn derive_feeding(genome: &CreatureGenome, physics: &DerivedPhysics) -> Feed
     }
 }
 
+/// Derive physical stats for a plant from its genome.
+/// Uses allometric scaling and LAI-based photosynthesis model.
+///
+/// Key ecological models applied:
+/// - Allometric metabolism: maintenance ∝ mass^0.75
+///   (Kleiber, M. "Body Size and Metabolic Rate." Physiological Reviews, 1947)
+/// - LAI photosynthesis: P = Pmax · (1 − e^(−c · LAI))
+///   (Beer–Lambert law applied to leaf area index light interception)
+/// - Complexity efficiency: more complex plants have slightly better biochemistry
+///   (+15% at complexity = 1.0)
+pub fn derive_plant_physics(genome: &crate::genome::PlantGenome) -> DerivedPhysics {
+    let mass = genome.plant_mass();
+    let lai = genome.effective_lai();
+
+    // Max energy scales with mass and storage factor
+    let max_energy = 15.0 * genome.max_energy_factor * (1.0 + mass);
+
+    // Photosynthesis rate: Beer-Lambert light capture with diminishing returns
+    // P = Pmax · (1 − e^(−0.5 · LAI)) · genome_rate
+    let light_capture = 1.0 - (-0.5 * lai).exp();
+    // base_metabolism is NEGATIVE for producers (photosynthesis)
+    // Magnitude is the photosynthesis strength
+    let base_photo = 0.25 * genome.photosynthesis_rate * (0.5 + light_capture);
+
+    // Complexity efficiency: more complex plants photosynthesize slightly better
+    let complexity_bonus = 1.0 + 0.15 * genome.complexity;
+
+    // Final base_metabolism: negative = net producer
+    let base_metabolism = -(base_photo * complexity_bonus);
+
+    DerivedPhysics {
+        body_mass: mass,
+        max_energy,
+        base_metabolism,
+        max_speed: 0.0,
+        acceleration: 0.0,
+        turn_radius: 0.0,
+        drag_coefficient: 0.0,
+        visual_profile: 0.3 + 0.4 * genome.height_factor,
+        camouflage: 0.0,
+        sensory_range: 0.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +370,60 @@ mod tests {
             improvement > 1.3,
             "Complexity 0.8 should give at least 30% more sensory range: {:.1}x improvement",
             improvement,
+        );
+    }
+
+    #[test]
+    fn test_plant_physics_valid() {
+        let mut rng = rand::rng();
+        for _ in 0..200 {
+            let g = crate::genome::PlantGenome::random(&mut rng);
+            let p = derive_plant_physics(&g);
+            assert!(p.base_metabolism < 0.0, "Plant metabolism should be negative (producer)");
+            assert!(p.max_energy > 0.0, "Plant max_energy must be positive");
+            assert!(p.body_mass > 0.0, "Plant mass must be positive");
+            assert_eq!(p.max_speed, 0.0, "Plants don't move");
+        }
+    }
+
+    #[test]
+    fn test_plant_lai_affects_photosynthesis() {
+        let mut rng = rand::rng();
+        let mut sparse = crate::genome::PlantGenome::minimal_plant(&mut rng);
+        sparse.leaf_area = 0.1;
+        sparse.branching = 0.0;
+        let mut dense = sparse.clone();
+        dense.leaf_area = 0.9;
+        dense.branching = 0.8;
+
+        let p_sparse = derive_plant_physics(&sparse);
+        let p_dense = derive_plant_physics(&dense);
+
+        assert!(
+            p_dense.base_metabolism < p_sparse.base_metabolism,
+            "Dense plant should photosynthesize more: {:.4} vs {:.4}",
+            p_dense.base_metabolism, p_sparse.base_metabolism,
+        );
+    }
+
+    #[test]
+    fn test_plant_allometric_energy() {
+        let mut rng = rand::rng();
+        let mut small = crate::genome::PlantGenome::minimal_plant(&mut rng);
+        small.stem_thickness = 0.1;
+        small.height_factor = 0.2;
+        small.max_energy_factor = 1.0;
+        let mut large = small.clone();
+        large.stem_thickness = 0.9;
+        large.height_factor = 0.9;
+
+        let p_small = derive_plant_physics(&small);
+        let p_large = derive_plant_physics(&large);
+
+        assert!(
+            p_large.max_energy > p_small.max_energy,
+            "Larger plant should store more energy: {:.2} vs {:.2}",
+            p_large.max_energy, p_small.max_energy,
         );
     }
 }

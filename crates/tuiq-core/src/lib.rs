@@ -10,6 +10,7 @@ pub mod genome;
 pub mod needs;
 pub mod phenotype;
 pub mod physics;
+pub mod plant_lifecycle;
 pub mod spatial;
 pub mod spawner;
 pub mod pheromone;
@@ -207,26 +208,17 @@ impl AquariumSim {
         ))
     }
 
-    /// Spawn a static plant entity (producer) that can be eaten.
+    /// Spawn a plant entity from a PlantGenome.
+    /// The genome determines the plant's physics, appearance, and lifespan.
     pub fn spawn_plant(
         &mut self,
         pos: Position,
-        bbox: BoundingBox,
-        appearance: Appearance,
-        anim: AnimationState,
+        genome: genome::PlantGenome,
     ) -> hecs::Entity {
-        let physics = phenotype::DerivedPhysics {
-            body_mass: 0.1,
-            max_energy: 15.0,
-            base_metabolism: -0.25, // Negative = photosynthesis
-            max_speed: 0.0,
-            acceleration: 0.0,
-            turn_radius: 0.0,
-            drag_coefficient: 0.0,
-            visual_profile: 0.5,
-            camouflage: 0.0,
-            sensory_range: 0.0,
-        };
+        let stage = PlantStage::Seedling;
+        let (appearance, bbox) = plant_lifecycle::build_appearance_from_genome(&genome, stage);
+
+        let physics = phenotype::derive_plant_physics(&genome);
 
         let feeding = FeedingCapability {
             max_prey_mass: 0.0,
@@ -235,15 +227,42 @@ impl AquariumSim {
             is_producer: true,
         };
 
+        // Plant lifespan scales with genome's lifespan_factor
+        // Base: ~2-4 in-game days; factor stretches or compresses
+        let base_ticks = 12000 + (self.rng.random_range(0..12000) as u64);
+        let lifespan_ticks = (base_ticks as f32 * genome.lifespan_factor) as u64;
+
+        let initial_energy = if genome.generation == 0 {
+            // Stagger Gen-0 starting energy (50-100%) so plants don't all sync
+            let frac = 0.5 + self.rng.random_range(0..50) as f32 / 100.0;
+            physics.max_energy * frac
+        } else {
+            // Seeds start with energy proportional to parent's seed_size gene
+            // Minimum 35% to avoid immediate wilting (threshold is 20%)
+            let seed_frac = (0.3 * genome.seed_size.min(1.5)).max(0.35);
+            physics.max_energy * seed_frac
+        };
+
+        // Stagger Gen-0 starting age so plants don't all hit stage thresholds together
+        let initial_age = if genome.generation == 0 {
+            self.rng.random_range(0..200) as f32 / 10.0 // 0-20 seconds
+        } else {
+            0.0
+        };
+
         self.world.spawn((
             pos,
             bbox,
             appearance,
-            anim,
+            AnimationState::new(0.8),
             Producer,
-            Energy::new(15.0),
+            Energy::new_with(initial_energy, physics.max_energy),
             physics,
             feeding,
+            genome,
+            stage,
+            PlantAge { seconds: initial_age },
+            Age { ticks: 0, max_ticks: lifespan_ticks },
         ))
     }
 
@@ -442,6 +461,9 @@ impl Simulation for AquariumSim {
         ecosystem::metabolism_system(&mut self.world, dt, &self.env, th);
         ecosystem::age_system(&mut self.world);
 
+        // 7b. Plant lifecycle: age plants, update growth stages and appearance
+        plant_lifecycle::plant_lifecycle_system(&mut self.world, dt);
+
         // 8. Hunting + feeding
         let kills = ecosystem::hunting_check(&self.world, &self.grid, &entity_map);
         let _hunted_dead = ecosystem::apply_kills(&mut self.world, &kills);
@@ -465,54 +487,56 @@ impl Simulation for AquariumSim {
             }
         }
 
-        // 10. Plant reproduction — mature plants seed new plants nearby
+        // 10. Plant reproduction — only flowering plants can seed
         self.plant_seed_timer += dt;
         let seed_interval = 5.0; // seconds between seeding attempts
         if self.plant_seed_timer >= seed_interval {
             self.plant_seed_timer -= seed_interval;
 
-            // Count existing plants and collect all seed candidates
+            // Count existing plants and collect flowering seed candidates
             let mut plant_count = 0;
-            let mut seed_candidates: Vec<(f32, f32)> = Vec::new();
-            for (pos, energy, _producer) in
-                &mut self.world.query::<(&Position, &Energy, &Producer)>()
+            let mut seed_candidates: Vec<(f32, f32, genome::PlantGenome)> = Vec::new();
+            for (pos, plant_genome, stage) in
+                &mut self.world.query::<(&Position, &genome::PlantGenome, &PlantStage)>()
             {
                 plant_count += 1;
-                // High-energy plants can seed (>70% max energy)
-                if energy.fraction() > 0.7 {
-                    seed_candidates.push((pos.x, pos.y));
+                if *stage == PlantStage::Flowering {
+                    seed_candidates.push((pos.x, pos.y, plant_genome.clone()));
                 }
             }
 
             // Scale plant cap with tank area (~1 per 100 cells, min 15)
             let max_plants = ((tw * th / 100.0) as usize).max(15);
             if plant_count < max_plants && !seed_candidates.is_empty() {
-                // Pick a random seed parent
-                let idx = self.rng.random_range(0..seed_candidates.len());
-                let (px, py) = seed_candidates[idx];
-                let offset_x = self.rng.random_range(-8.0..8.0_f32);
-                let offset_y = self.rng.random_range(-4.0..4.0_f32);
-                let new_x = (px + offset_x).clamp(2.0, tw - 2.0);
-                let new_y = (py + offset_y).clamp(th * 0.3, th - 3.0);
+                // 30% chance to seed per interval — prevents all plants seeding simultaneously
+                if self.rng.random_range(0..100) < 30 {
+                    let idx = self.rng.random_range(0..seed_candidates.len());
+                    let (px, py, ref parent_genome) = seed_candidates[idx];
 
-                let frame = AsciiFrame::from_rows(vec![
-                    "  )",
-                    " ( ",
-                    "  )",
-                    " ()",
-                    "_||_",
-                ]);
-                let appearance = Appearance {
-                    frame_sets: vec![vec![frame.clone()], vec![frame]],
-                    facing: Direction::Right,
-                    color_index: 2,
-                };
-                self.spawn_plant(
-                    Position { x: new_x, y: new_y },
-                    BoundingBox { w: 4.0, h: 5.0 },
-                    appearance,
-                    AnimationState::new(0.5),
-                );
+                    // Number of seeds this parent produces (genome-driven)
+                    let num_seeds = (parent_genome.seed_count).round().max(1.0) as usize;
+                    let seed_range = 4.0 + parent_genome.seed_range * 8.0;
+
+                    for _ in 0..num_seeds.min(3) {
+                        if plant_count >= max_plants { break; }
+
+                        // Mutate parent genome to create offspring
+                        let mut child_genome = parent_genome.clone();
+                        let mutation_rate = parent_genome.mutation_rate_factor * 0.15;
+                        genetics::mutate_plant(&mut child_genome, mutation_rate, &mut self.rng);
+
+                        let offset_x = self.rng.random_range(-seed_range..seed_range);
+                        let offset_y = self.rng.random_range((-seed_range * 0.5)..(seed_range * 0.5));
+                        let new_x = (px + offset_x).clamp(2.0, tw - 2.0);
+                        let new_y = (py + offset_y).clamp(th * 0.3, th - 3.0);
+
+                        self.spawn_plant(
+                            Position { x: new_x, y: new_y },
+                            child_genome,
+                        );
+                        plant_count += 1;
+                    }
+                }
             }
         }
 
@@ -617,17 +641,11 @@ mod tests {
 
     /// Helper: spawn a seaweed plant for integration tests.
     fn spawn_test_plant(sim: &mut AquariumSim, x: f32, y: f32) {
-        let frame = AsciiFrame::from_rows(vec![")"]);
-        let appearance = Appearance {
-            frame_sets: vec![vec![frame.clone()], vec![frame]],
-            facing: Direction::Right,
-            color_index: 5,
-        };
+        let mut rng = rand::rng();
+        let genome = genome::PlantGenome::minimal_plant(&mut rng);
         sim.spawn_plant(
             Position { x, y },
-            BoundingBox { w: 1.0, h: 1.0 },
-            appearance,
-            AnimationState::new(0.5),
+            genome,
         );
     }
 
@@ -687,19 +705,28 @@ mod tests {
     fn test_plants_seed_new_plants() {
         let mut sim = AquariumSim::new(40, 20);
 
-        // Start with one high-energy plant
-        spawn_test_plant(&mut sim, 20.0, 10.0);
+        // Start with one high-energy plant near surface
+        spawn_test_plant(&mut sim, 20.0, 5.0);
+
+        // Override to high energy and mature age so it reaches Flowering stage
+        for energy in sim.world.query_mut::<&mut Energy>() {
+            energy.current = energy.max * 0.95;
+        }
+        for age in sim.world.query_mut::<&mut PlantAge>() {
+            age.seconds = 50.0; // past Young threshold (40s)
+        }
+
         assert_eq!(sim.stats().entity_count, 1);
 
-        // Run long enough for seeding (interval = 10s, at 0.05s/tick = 200 ticks)
-        // Plant photosynthesizes and seeds when >80% energy
-        for _ in 0..600 {
+        // Run enough ticks for seeding (5s interval × 30% probability)
+        // ~50 intervals over 250s = very high chance of at least one seed
+        for _ in 0..5000 {
             sim.tick(0.05);
         }
 
         assert!(
             sim.stats().entity_count > 1,
-            "Mature plant should seed new plants. Entities={}",
+            "Flowering plant should seed new plants. Entities={}",
             sim.stats().entity_count,
         );
     }
@@ -707,21 +734,25 @@ mod tests {
     #[test]
     fn test_plants_regenerate_energy() {
         let mut sim = AquariumSim::new(40, 20);
-        spawn_test_plant(&mut sim, 10.0, 10.0);
+        spawn_test_plant(&mut sim, 10.0, 3.0); // near surface for better light
 
+        // Set energy to mid-range (above unstable equilibrium ~19%)
         for energy in sim.world.query_mut::<&mut Energy>() {
-            energy.current = 5.0;
+            energy.current = energy.max * 0.4;
         }
 
-        for _ in 0..200 {
+        let initial: f32 = sim.world.query_mut::<&Energy>()
+            .into_iter().next().unwrap().current;
+
+        for _ in 0..400 {
             sim.tick(0.05);
         }
 
         for energy in &mut sim.world.query::<&Energy>() {
             assert!(
-                energy.current > 5.0,
-                "Plant should regenerate energy via photosynthesis, got {}",
-                energy.current
+                energy.current > initial,
+                "Plant should regenerate energy via photosynthesis, got {} (started at {})",
+                energy.current, initial
             );
             break;
         }
@@ -1300,6 +1331,116 @@ mod tests {
             "Max complexity should exceed 0.15 after 5 sim days (saw {:.3}). \
              Births: {}. Complexity mutations aren't driving evolution.",
             max_complexity_seen, total_births,
+        );
+    }
+
+    #[test]
+    fn test_plant_full_lifecycle_to_death() {
+        // Spawn a plant with a very short lifespan and verify it gets removed by death_system
+        let mut sim = AquariumSim::new(40, 20);
+        let mut rng = rand::rng();
+        let mut genome = genome::PlantGenome::minimal_plant(&mut rng);
+        genome.lifespan_factor = 0.01; // very short lifespan
+
+        sim.spawn_plant(Position { x: 20.0, y: 15.0 }, genome);
+        assert_eq!(sim.stats().entity_count, 1);
+
+        // Tick long enough for age to exceed max_ticks
+        // With lifespan_factor=0.01, max_ticks ≈ 12000*0.01 = 120 ticks
+        for _ in 0..500 {
+            sim.tick(0.05);
+        }
+
+        // Plant should have died by age
+        let plant_count: usize = {
+            let mut count = 0;
+            for (_, g) in &mut sim.world.query::<(hecs::Entity, &genome::PlantGenome)>() {
+                if g.generation == 0 {
+                    count += 1;
+                }
+            }
+            count
+        };
+
+        // The original gen-0 plant should be dead (it may have seeded before dying)
+        assert_eq!(
+            plant_count, 0,
+            "Gen-0 plant with very short lifespan should die by age"
+        );
+    }
+
+    #[test]
+    fn test_gen0_plants_have_staggered_stages() {
+        let mut sim = AquariumSim::new(80, 24);
+
+        // Spawn 10 plants
+        for i in 0..10 {
+            let mut rng = rand::rng();
+            let genome = genome::PlantGenome::minimal_plant(&mut rng);
+            sim.spawn_plant(Position { x: 5.0 + i as f32 * 7.0, y: 18.0 }, genome);
+        }
+
+        // Tick enough so starting age spread (0-20s) straddles Young→Mature boundary (40s)
+        // After 30s sim time: plants at ages 30-50s → some Young (<40s), some Mature (≥40s)
+        for _ in 0..600 {
+            sim.tick(0.05); // 30 sim seconds
+        }
+
+        // Collect stages
+        let stages: Vec<PlantStage> = {
+            let mut v = Vec::new();
+            for s in sim.world.query_mut::<&PlantStage>() {
+                v.push(*s);
+            }
+            v
+        };
+
+        // With staggered starting age (0-20s) and energy (50-100%),
+        // not all plants should be in the same stage
+        let all_same = stages.windows(2).all(|w| w[0] == w[1]);
+        assert!(
+            !all_same || stages.len() <= 1,
+            "Gen-0 plants should have staggered stages, but all {} are {:?}",
+            stages.len(), stages.first()
+        );
+    }
+
+    #[test]
+    fn test_flowering_plant_produces_offspring() {
+        let mut sim = AquariumSim::new(60, 20);
+
+        // Spawn one plant, manually set it to flowering with high energy
+        let mut rng = rand::rng();
+        let mut genome = genome::PlantGenome::minimal_plant(&mut rng);
+        genome.seed_count = 3.0;
+        genome.seed_range = 1.0;
+
+        let entity = sim.spawn_plant(Position { x: 30.0, y: 15.0 }, genome);
+
+        // Set to flowering stage + high energy + past young age
+        if let Ok(mut stage) = sim.world.get::<&mut PlantStage>(entity) {
+            *stage = PlantStage::Flowering;
+        }
+        if let Ok(mut energy) = sim.world.get::<&mut ecosystem::Energy>(entity) {
+            energy.current = energy.max * 0.95;
+        }
+        if let Ok(mut age) = sim.world.get::<&mut PlantAge>(entity) {
+            age.seconds = 50.0;
+        }
+
+        let initial_count = sim.stats().entity_count;
+
+        // Run enough ticks for seeding (5s interval × 30% probability → ~17s on average)
+        // Run 50 seeding intervals to almost guarantee at least one seeds
+        for _ in 0..5000 {
+            sim.tick(0.05);
+        }
+
+        let final_count = sim.stats().entity_count;
+        assert!(
+            final_count > initial_count,
+            "Flowering plant should produce offspring. Initial={}, Final={}",
+            initial_count, final_count
         );
     }
 }

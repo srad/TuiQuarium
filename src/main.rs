@@ -9,7 +9,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use tuiq_core::components::*;
-use tuiq_core::genome::CreatureGenome;
+use tuiq_core::genome::{CreatureGenome, PlantGenome};
 use tuiq_core::{AquariumSim, Simulation};
 use tuiq_render::ascii::generate_frames;
 use tuiq_render::{DisplayState, TuiRenderer};
@@ -77,27 +77,15 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
     }
 
     // Spawn plants scaled to tank area (roughly 1 per 150 cells, min 12)
+    // Each plant gets a random genome — evolution will shape them over time
     let plant_count = ((tw * th / 150.0) as usize).max(12);
     for i in 0..plant_count {
         let x = 3.0 + (i as f32 / plant_count as f32) * (tw - 6.0);
         let y = th * 0.5 + (i as f32 % 4.0) * 2.5;
-        let frame = AsciiFrame::from_rows(vec![
-            "  )",
-            " ( ",
-            "  )",
-            " ()",
-            "_||_",
-        ]);
-        let appearance = Appearance {
-            frame_sets: vec![vec![frame.clone()], vec![frame]],
-            facing: Direction::Right,
-            color_index: 2, // green
-        };
+        let genome = PlantGenome::minimal_plant(&mut rng);
         sim.spawn_plant(
             Position { x, y },
-            BoundingBox { w: 4.0, h: 5.0 },
-            appearance,
-            AnimationState::new(0.5),
+            genome,
         );
     }
 

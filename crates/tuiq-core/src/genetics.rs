@@ -156,6 +156,54 @@ pub fn genomic_distance(a: &CreatureGenome, b: &CreatureGenome) -> f32 {
     dist
 }
 
+/// Mutate a plant genome in-place. Each float gene has `rate` probability of being perturbed.
+/// Complexity always mutates (like creature genomes). Plants reproduce asexually only —
+/// no crossover. Mutation is the sole source of genetic variation.
+///
+/// Gene ranges enforce ecological constraints: physiology genes (0.3–2.0) allow trade-offs
+/// between Grime's C-S-R strategies; seed_count vs seed_size encodes r/K selection.
+pub fn mutate_plant(genome: &mut PlantGenome, rate: f32, rng: &mut impl Rng) {
+    // Morphology
+    perturb(&mut genome.stem_thickness, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.height_factor, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.leaf_area, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.branching, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.curvature, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.primary_hue, 0.0, 1.0, rate, rng);
+
+    // Physiology
+    perturb(&mut genome.photosynthesis_rate, 0.5, 2.0, rate, rng);
+    perturb(&mut genome.max_energy_factor, 0.5, 2.0, rate, rng);
+    perturb(&mut genome.hardiness, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.seed_range, 0.5, 2.0, rate, rng);
+    perturb(&mut genome.seed_count, 0.3, 2.0, rate, rng);
+    perturb(&mut genome.seed_size, 0.3, 2.0, rate, rng);
+    perturb(&mut genome.lifespan_factor, 0.5, 2.0, rate, rng);
+    perturb(&mut genome.nutritional_value, 0.3, 1.5, rate, rng);
+
+    // Mutation rate factor mutates slowly (independent of itself)
+    perturb(&mut genome.mutation_rate_factor, 0.5, 2.0, 0.05, rng);
+
+    // Complexity always mutates
+    let delta: f32 = rng.random_range(-0.15..0.15);
+    genome.complexity = (genome.complexity + delta).clamp(0.0, 1.0);
+}
+
+/// Genomic distance between two plants for speciation analysis.
+pub fn plant_genomic_distance(a: &PlantGenome, b: &PlantGenome) -> f32 {
+    let mut dist = 0.0_f32;
+    dist += (a.stem_thickness - b.stem_thickness).abs();
+    dist += (a.height_factor - b.height_factor).abs();
+    dist += (a.leaf_area - b.leaf_area).abs();
+    dist += (a.branching - b.branching).abs();
+    dist += (a.curvature - b.curvature).abs();
+    dist += (a.photosynthesis_rate - b.photosynthesis_rate).abs();
+    dist += (a.max_energy_factor - b.max_energy_factor).abs();
+    dist += (a.hardiness - b.hardiness).abs();
+    dist += (a.complexity - b.complexity).abs();
+    dist
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

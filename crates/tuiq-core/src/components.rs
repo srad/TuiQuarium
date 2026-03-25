@@ -117,3 +117,19 @@ impl AnimationState {
         }
     }
 }
+
+/// Plant growth stage — derived from energy and age.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlantStage {
+    Seedling,
+    Young,
+    Mature,
+    Flowering,
+    Wilting,
+}
+
+/// Tracks how long a plant has been alive (in simulation seconds).
+#[derive(Debug, Clone)]
+pub struct PlantAge {
+    pub seconds: f32,
+}
