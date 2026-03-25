@@ -71,7 +71,7 @@ impl Default for NeedWeights {
             rest_rate: 0.01,
             comfort_sensitivity: 0.3,
             social_need: 0.5,
-            reproduction_rate: 0.005,
+            reproduction_rate: 0.02,
             territory_need: 0.0,
             curiosity_rate: 0.01,
         }

@@ -83,7 +83,7 @@ impl EventKind {
 const HOURS_PER_SECOND: f32 = 24.0 / 300.0;
 
 /// Average interval between random events (seconds).
-const EVENT_INTERVAL: f32 = 90.0;
+const EVENT_INTERVAL: f32 = 60.0;
 
 impl Environment {
     /// Advance the environment by dt seconds.
@@ -112,7 +112,7 @@ impl Environment {
         let temp_variation = hour_angle.sin() * 1.5; // ±1.5°C
         let base_temp = 25.0 + temp_variation;
         self.temperature = match &self.active_event {
-            Some(e) if e.kind == EventKind::ColdSnap => base_temp - 5.0,
+            Some(e) if e.kind == EventKind::ColdSnap => base_temp - 10.0,
             _ => base_temp,
         };
 
@@ -156,6 +156,32 @@ impl Environment {
         // Q10 rule simplified: 10% per degree from baseline 25°C
         let delta = self.temperature - 25.0;
         (1.0 + delta * 0.02).clamp(0.5, 2.0)
+    }
+
+    /// Light level at a given depth (y position, tank_height).
+    /// Surface (y < 30% of height) gets full light.
+    /// Mid-water (30-70%) gets moderate light.
+    /// Deep (bottom 30%) gets reduced light.
+    pub fn light_at_depth(&self, y: f32, tank_height: f32) -> f32 {
+        let depth_fraction = y / tank_height; // 0.0 = top, 1.0 = bottom
+        let depth_factor = if depth_fraction < 0.3 {
+            1.0 // Surface zone: full light
+        } else if depth_fraction < 0.7 {
+            0.7 // Mid-water: moderate
+        } else {
+            0.4 // Deep zone: dim
+        };
+        self.light_level * depth_factor
+    }
+
+    /// Metabolism modifier at a given depth. Deep water is cooler = slower metabolism.
+    pub fn metabolism_at_depth(&self, y: f32, tank_height: f32) -> f32 {
+        let depth_fraction = y / tank_height;
+        if depth_fraction > 0.7 {
+            0.85 // Deep zone: 15% slower metabolism
+        } else {
+            1.0
+        }
     }
 }
 
@@ -257,5 +283,46 @@ mod tests {
             (c1.0 - c2.0).abs() > 0.01 || (c1.1 - c2.1).abs() > 0.01,
             "Current should change over time"
         );
+    }
+
+    #[test]
+    fn test_light_at_depth_surface() {
+        let mut env = Environment::default();
+        env.light_level = 1.0;
+        // y=10 in a 100-height tank = 10% depth (surface zone)
+        let light = env.light_at_depth(10.0, 100.0);
+        assert!((light - 1.0).abs() < 0.01, "Surface zone should have full light: {}", light);
+    }
+
+    #[test]
+    fn test_light_at_depth_mid() {
+        let mut env = Environment::default();
+        env.light_level = 1.0;
+        // y=50 in a 100-height tank = 50% depth (mid-water zone)
+        let light = env.light_at_depth(50.0, 100.0);
+        assert!((light - 0.7).abs() < 0.01, "Mid-water zone should have 0.7 light: {}", light);
+    }
+
+    #[test]
+    fn test_light_at_depth_deep() {
+        let mut env = Environment::default();
+        env.light_level = 1.0;
+        // y=80 in a 100-height tank = 80% depth (deep zone)
+        let light = env.light_at_depth(80.0, 100.0);
+        assert!((light - 0.4).abs() < 0.01, "Deep zone should have 0.4 light: {}", light);
+    }
+
+    #[test]
+    fn test_metabolism_at_depth_surface_normal() {
+        let env = Environment::default();
+        let meta = env.metabolism_at_depth(20.0, 100.0);
+        assert!((meta - 1.0).abs() < 0.01, "Surface metabolism should be 1.0: {}", meta);
+    }
+
+    #[test]
+    fn test_metabolism_at_depth_deep_reduced() {
+        let env = Environment::default();
+        let meta = env.metabolism_at_depth(80.0, 100.0);
+        assert!((meta - 0.85).abs() < 0.01, "Deep metabolism should be 0.85: {}", meta);
     }
 }

@@ -2,12 +2,13 @@
 //! Three rules: separation, alignment, cohesion + wall avoidance.
 
 use hecs::{Entity, World};
+use rayon::prelude::*;
 
 use crate::behavior::{BehaviorAction, BehaviorState};
 use crate::components::{BoundingBox, Position, Velocity};
-use crate::ecosystem::TrophicRole;
-use crate::phenotype::DerivedPhysics;
+use crate::phenotype::{DerivedPhysics, FeedingCapability};
 use crate::spatial::SpatialGrid;
+use crate::EntityInfoMap;
 
 /// Parameters for the boids algorithm.
 #[derive(Debug, Clone)]
@@ -22,7 +23,6 @@ pub struct BoidParams {
     pub wall_avoidance_weight: f32,
     pub max_speed: f32,
     pub max_force: f32,
-    // New steering weights
     pub seek_weight: f32,
     pub flee_weight: f32,
 }
@@ -51,51 +51,48 @@ impl Default for BoidParams {
 pub struct Boid;
 
 /// Run the boids flocking system + goal seeking.
-/// Modifies velocities of all entities with a Boid component.
 pub fn boids_system(
     world: &mut World,
     grid: &SpatialGrid,
+    entity_map: &EntityInfoMap,
     params: &BoidParams,
     tank_w: f32,
     tank_h: f32,
     dt: f32,
 ) {
     // Collect current state of boids
-    let boid_states: Vec<(Entity, f32, f32, f32, f32, f32, BehaviorAction, TrophicRole, f32)> = {
+    let boid_states: Vec<(Entity, f32, f32, f32, f32, f32, BehaviorAction, f32, f32, f32)> = {
         let mut states = Vec::new();
-        for (entity, pos, vel, bbox, behavior, role, physics) in
+        for (entity, pos, vel, bbox, behavior, physics, feeding) in
             &mut world.query::<(
                 Entity,
                 &Position,
                 &Velocity,
                 &BoundingBox,
                 &BehaviorState,
-                &TrophicRole,
                 &DerivedPhysics,
+                &FeedingCapability,
             )>()
         {
             if world.get::<&Boid>(entity).is_ok() {
                 states.push((
                     entity,
-                    pos.x,
-                    pos.y,
-                    vel.vx,
-                    vel.vy,
+                    pos.x, pos.y,
+                    vel.vx, vel.vy,
                     bbox.w.max(bbox.h),
                     behavior.action,
-                    *role,
                     physics.sensory_range,
+                    feeding.max_prey_mass,
+                    physics.body_mass,
                 ));
             }
         }
         states
     };
 
-    // Forces calculation
-    let mut forces: Vec<(Entity, f32, f32)> = Vec::with_capacity(boid_states.len());
-
-    for &(entity, px, py, vx, vy, size, action, role, sensory_range) in &boid_states {
-        // Flocking accumulators
+    // Compute forces in parallel (using shared entity_map)
+    let forces: Vec<(Entity, f32, f32)> = boid_states.par_iter().map(
+        |&(entity, px, py, vx, vy, size, action, sensory_range, max_prey_mass, body_mass)| {
         let mut sep_x = 0.0_f32;
         let mut sep_y = 0.0_f32;
         let mut sep_count = 0;
@@ -108,10 +105,9 @@ pub fn boids_system(
         let mut coh_y = 0.0_f32;
         let mut coh_count = 0;
 
-        // Steering accumulators
         let mut seek_target: Option<(f32, f32)> = None;
         let mut closest_target_dist = f32::MAX;
-        
+
         let mut flee_target: Option<(f32, f32)> = None;
         let mut closest_threat_dist = f32::MAX;
 
@@ -122,68 +118,50 @@ pub fn boids_system(
                 continue;
             }
 
-            let other_pos = match world.get::<&Position>(other) {
-                Ok(p) => p,
-                Err(_) => continue,
+            let info = match entity_map.get(&other) {
+                Some(i) => i,
+                None => continue,
             };
-            let ox = other_pos.x;
-            let oy = other_pos.y;
-            
-            let dx = px - ox;
-            let dy = py - oy;
+
+            let dx = px - info.x;
+            let dy = py - info.y;
             let dist = (dx * dx + dy * dy).sqrt().max(0.01);
 
-            // 1. Goal Seeking Logic (Food/Prey)
+            // Seek: find edible targets (producers or smaller entities)
             if action == BehaviorAction::Forage || action == BehaviorAction::Hunt {
-                if let Ok(other_role) = world.get::<&TrophicRole>(other) {
-                    let is_target = match action {
-                        BehaviorAction::Forage => role.can_eat(*other_role), // Herbivore -> Producer
-                        BehaviorAction::Hunt => role.can_eat(*other_role),   // Carnivore -> Herbivore
-                        _ => false,
-                    };
+                let is_edible = info.is_producer || info.body_mass < max_prey_mass;
+                if is_edible && dist < sensory_range && dist < closest_target_dist {
+                    closest_target_dist = dist;
+                    seek_target = Some((info.x, info.y));
+                }
+            }
 
-                    if is_target && dist < sensory_range && dist < closest_target_dist {
-                        closest_target_dist = dist;
-                        seek_target = Some((ox, oy));
+            // Flee: entities that could eat me
+            if action == BehaviorAction::Flee {
+                if info.max_prey_mass > body_mass && info.hunt_skill > 0.3 {
+                    if dist < sensory_range && dist < closest_threat_dist {
+                        closest_threat_dist = dist;
+                        flee_target = Some((info.x, info.y));
                     }
                 }
             }
 
-            // 2. Flee Logic (Predators)
-            if action == BehaviorAction::Flee {
-                if let Ok(other_role) = world.get::<&TrophicRole>(other) {
-                     // Check if other is a threat (Carnivore vs Herbivore)
-                     let is_threat = other_role.can_eat(role);
-                     if is_threat && dist < sensory_range && dist < closest_threat_dist {
-                         closest_threat_dist = dist;
-                         flee_target = Some((ox, oy));
-                     }
-                }
-            }
-
-            // 3. Flocking Logic (only with other boids)
-            if world.get::<&Boid>(other).is_ok() {
-                 let other_vel = match world.get::<&Velocity>(other) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                 };
-                // Separation
-                let sep_dist = params.separation_radius + size; // Simplified size check
+            // Flocking (only with other boids)
+            if info.is_boid {
+                let sep_dist = params.separation_radius + size;
                 if dist < sep_dist {
                     sep_x += dx / dist;
                     sep_y += dy / dist;
                     sep_count += 1;
                 }
-                // Alignment
                 if dist < params.alignment_radius {
-                    align_vx += other_vel.vx;
-                    align_vy += other_vel.vy;
+                    align_vx += info.vx;
+                    align_vy += info.vy;
                     align_count += 1;
                 }
-                // Cohesion
                 if dist < params.cohesion_radius {
-                    coh_x += ox;
-                    coh_y += oy;
+                    coh_x += info.x;
+                    coh_y += info.y;
                     coh_count += 1;
                 }
             }
@@ -192,23 +170,17 @@ pub fn boids_system(
         let mut force_x = 0.0_f32;
         let mut force_y = 0.0_f32;
 
-        // Apply Steering (Seek)
         if let Some((tx, ty)) = seek_target {
-            // Vector to target
             let dx = tx - px;
             let dy = ty - py;
             let dist = (dx * dx + dy * dy).sqrt().max(0.01);
-            // Normalize and scale to max speed
             let desired_x = (dx / dist) * params.max_speed;
             let desired_y = (dy / dist) * params.max_speed;
-            // Steering = Desired - Velocity
             force_x += (desired_x - vx) * params.seek_weight;
             force_y += (desired_y - vy) * params.seek_weight;
         }
 
-        // Apply Steering (Flee)
         if let Some((tx, ty)) = flee_target {
-            // Vector away from target
             let dx = px - tx;
             let dy = py - ty;
             let dist = (dx * dx + dy * dy).sqrt().max(0.01);
@@ -218,7 +190,6 @@ pub fn boids_system(
             force_y += (desired_y - vy) * params.flee_weight;
         }
 
-        // Apply Flocking Forces
         if sep_count > 0 {
             force_x += (sep_x / sep_count as f32) * params.separation_weight;
             force_y += (sep_y / sep_count as f32) * params.separation_weight;
@@ -239,36 +210,25 @@ pub fn boids_system(
         // Wall avoidance
         let wd = params.wall_avoidance_dist;
         let ww = params.wall_avoidance_weight;
-        if px < wd {
-            force_x += (wd - px) / wd * ww;
-        }
-        if px > tank_w - wd {
-            force_x -= (px - (tank_w - wd)) / wd * ww;
-        }
-        if py < wd {
-            force_y += (wd - py) / wd * ww;
-        }
-        if py > tank_h - wd {
-            force_y -= (py - (tank_h - wd)) / wd * ww;
-        }
+        if px < wd { force_x += (wd - px) / wd * ww; }
+        if px > tank_w - wd { force_x -= (px - (tank_w - wd)) / wd * ww; }
+        if py < wd { force_y += (wd - py) / wd * ww; }
+        if py > tank_h - wd { force_y -= (py - (tank_h - wd)) / wd * ww; }
 
-        // Clamp force
         let mag = (force_x * force_x + force_y * force_y).sqrt();
         if mag > params.max_force {
             force_x = force_x / mag * params.max_force;
             force_y = force_y / mag * params.max_force;
         }
 
-        forces.push((entity, force_x, force_y));
-    }
+        (entity, force_x, force_y)
+    }).collect();
 
-    // Apply forces to velocities
     for (entity, fx, fy) in forces {
         if let Ok(mut vel) = world.get::<&mut Velocity>(entity) {
             vel.vx += fx * dt;
             vel.vy += fy * dt;
 
-            // Clamp speed
             let speed = (vel.vx * vel.vx + vel.vy * vel.vy).sqrt();
             if speed > params.max_speed {
                 vel.vx = vel.vx / speed * params.max_speed;
@@ -283,8 +243,34 @@ mod tests {
     use super::*;
     use crate::components::*;
     use crate::behavior::BehaviorState;
-    use crate::ecosystem::TrophicRole;
-    use crate::phenotype::DerivedPhysics;
+    use crate::phenotype::{DerivedPhysics, FeedingCapability};
+    use crate::EntityInfo;
+    use std::collections::HashMap;
+
+    fn build_entity_map(world: &World) -> EntityInfoMap {
+        let mut m = HashMap::new();
+        for (entity, pos, vel, physics) in
+            &mut world.query::<(Entity, &Position, &Velocity, &DerivedPhysics)>()
+        {
+            let is_boid = world.get::<&Boid>(entity).is_ok();
+            let (max_prey_mass, hunt_skill, graze_skill) = world
+                .get::<&FeedingCapability>(entity)
+                .map(|f| (f.max_prey_mass, f.hunt_skill, f.graze_skill))
+                .unwrap_or((0.0, 0.0, 0.0));
+            m.insert(entity, EntityInfo {
+                x: pos.x, y: pos.y,
+                vx: vel.vx, vy: vel.vy,
+                body_mass: physics.body_mass,
+                max_speed: physics.max_speed,
+                is_producer: false,
+                is_boid,
+                max_prey_mass,
+                hunt_skill,
+                graze_skill,
+            });
+        }
+        m
+    }
 
     fn spawn_boid(world: &mut World, x: f32, y: f32, vx: f32, vy: f32) -> Entity {
         let frame = AsciiFrame::from_rows(vec!["<>"]);
@@ -293,8 +279,7 @@ mod tests {
             facing: Direction::Right,
             color_index: 0,
         };
-        
-        // Dummy physics
+
         let physics = DerivedPhysics {
             max_speed: 5.0,
             acceleration: 1.0,
@@ -308,6 +293,13 @@ mod tests {
             sensory_range: 20.0,
         };
 
+        let feeding = FeedingCapability {
+            max_prey_mass: 0.5,
+            hunt_skill: 0.0,
+            graze_skill: 0.8,
+            is_producer: false,
+        };
+
         world.spawn((
             Position { x, y },
             Velocity { vx, vy },
@@ -316,11 +308,10 @@ mod tests {
             AnimationState::new(0.2),
             Boid,
             BehaviorState::default(),
-            TrophicRole::Herbivore,
             physics,
+            feeding,
         ))
     }
-
 
     #[test]
     fn test_separation_pushes_apart() {
@@ -339,11 +330,11 @@ mod tests {
             ..Default::default()
         };
 
-        boids_system(&mut world, &grid, &params, 100.0, 100.0, 1.0);
+        let emap = build_entity_map(&world);
+        boids_system(&mut world, &grid, &emap, &params, 100.0, 100.0, 1.0);
 
         let v1 = world.get::<&Velocity>(e1).unwrap();
         let v2 = world.get::<&Velocity>(e2).unwrap();
-        // e1 should be pushed left (negative vx), e2 right (positive vx)
         assert!(v1.vx < 0.0, "e1 should be pushed left, got {}", v1.vx);
         assert!(v2.vx > 0.0, "e2 should be pushed right, got {}", v2.vx);
     }
@@ -366,7 +357,8 @@ mod tests {
             ..Default::default()
         };
 
-        boids_system(&mut world, &grid, &params, 100.0, 100.0, 1.0);
+        let emap = build_entity_map(&world);
+        boids_system(&mut world, &grid, &emap, &params, 100.0, 100.0, 1.0);
 
         let v1 = world.get::<&Velocity>(e1).unwrap();
         assert!(v1.vx > 0.0, "e1 should align rightward, got {}", v1.vx);
@@ -390,7 +382,8 @@ mod tests {
             ..Default::default()
         };
 
-        boids_system(&mut world, &grid, &params, 100.0, 100.0, 1.0);
+        let emap = build_entity_map(&world);
+        boids_system(&mut world, &grid, &emap, &params, 100.0, 100.0, 1.0);
 
         let v1 = world.get::<&Velocity>(e1).unwrap();
         assert!(v1.vx > 0.0, "e1 should be pulled right toward group center, got {}", v1.vx);

@@ -42,8 +42,11 @@ pub fn render_hud(
     let speed_str = format!("{:.1}x", speed);
 
     let status_line = format!(
-        " Creatures: {} | Born: {} Died: {} | Day {} {} {} | Temp: {} | Light: {} | Speed: {}{}{} ",
+        " Pop: {} | Gen: {} | Cx: {:.2} | Sp: {} | Born: {} Died: {} | Day {} {} {} | {}  {} | {}{}{} ",
         stats.creature_count,
+        stats.max_generation,
+        stats.avg_complexity,
+        stats.species_count,
         stats.births,
         stats.deaths,
         stats.elapsed_days + 1,
@@ -56,7 +59,7 @@ pub fn render_hud(
         event_str,
     );
 
-    let controls = " q:Quit  Space:Pause  +/-:Speed  f:Feed  d:Debug ";
+    let controls = " q:Quit  Space:Pause  +/-:Speed  f:Feed ";
 
     // Status line at bottom-1
     let status_y = area.y + area.height.saturating_sub(2);

@@ -124,27 +124,24 @@ fn render_creature(
     let frame_idx = anim.frame_index.min(frame_set.len() - 1);
     let art_frame = &frame_set[frame_idx];
 
-    // Flip if facing left
-    let frame_to_draw = if appearance.facing == Direction::Left {
-        art_frame.flip_horizontal()
-    } else {
-        art_frame.clone()
-    };
-
     let creature_style = Style::default().fg(creature_color(appearance.color_index));
+    let flip = appearance.facing == Direction::Left;
 
-    for (row_idx, row_str) in frame_to_draw.rows.iter().enumerate() {
+    for (row_idx, row_str) in art_frame.rows.iter().enumerate() {
         let screen_y = pos.y as i32 + row_idx as i32;
         if screen_y < 0 || screen_y >= area.height as i32 {
             continue;
         }
         let y = area.y + screen_y as u16;
 
+        let row_len = row_str.chars().count();
         for (col_idx, ch) in row_str.chars().enumerate() {
             if ch == ' ' {
                 continue; // Transparent
             }
-            let screen_x = pos.x as i32 + col_idx as i32;
+            // When facing left, mirror the column index (no allocation)
+            let draw_col = if flip { row_len - 1 - col_idx } else { col_idx };
+            let screen_x = pos.x as i32 + draw_col as i32;
             if screen_x < 0 || screen_x >= area.width as i32 {
                 continue;
             }

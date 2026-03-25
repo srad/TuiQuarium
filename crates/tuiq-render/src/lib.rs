@@ -3,7 +3,6 @@ pub mod effects;
 pub mod hud;
 pub mod palette;
 pub mod tank;
-pub mod templates;
 
 use effects::BubbleSystem;
 use ratatui::Frame;
