@@ -487,20 +487,20 @@ impl Simulation for AquariumSim {
             }
         }
 
-        // 10. Plant reproduction — only flowering plants can seed
+        // 10. Plant reproduction — mature and flowering plants can seed
         self.plant_seed_timer += dt;
         let seed_interval = 5.0; // seconds between seeding attempts
         if self.plant_seed_timer >= seed_interval {
             self.plant_seed_timer -= seed_interval;
 
-            // Count existing plants and collect flowering seed candidates
+            // Count existing plants and collect seed candidates (Mature or Flowering)
             let mut plant_count = 0;
             let mut seed_candidates: Vec<(f32, f32, genome::PlantGenome)> = Vec::new();
             for (pos, plant_genome, stage) in
                 &mut self.world.query::<(&Position, &genome::PlantGenome, &PlantStage)>()
             {
                 plant_count += 1;
-                if *stage == PlantStage::Flowering {
+                if *stage == PlantStage::Mature || *stage == PlantStage::Flowering {
                     seed_candidates.push((pos.x, pos.y, plant_genome.clone()));
                 }
             }
@@ -705,13 +705,10 @@ mod tests {
     fn test_plants_seed_new_plants() {
         let mut sim = AquariumSim::new(40, 20);
 
-        // Start with one high-energy plant near surface
+        // Start with one plant near surface
         spawn_test_plant(&mut sim, 20.0, 5.0);
 
-        // Override to high energy and mature age so it reaches Flowering stage
-        for energy in sim.world.query_mut::<&mut Energy>() {
-            energy.current = energy.max * 0.95;
-        }
+        // Override to mature age so it reaches Mature stage (sufficient for seeding)
         for age in sim.world.query_mut::<&mut PlantAge>() {
             age.seconds = 50.0; // past Young threshold (40s)
         }
@@ -1409,7 +1406,7 @@ mod tests {
     fn test_flowering_plant_produces_offspring() {
         let mut sim = AquariumSim::new(60, 20);
 
-        // Spawn one plant, manually set it to flowering with high energy
+        // Spawn one plant, manually set it to Mature (sufficient for seeding)
         let mut rng = rand::rng();
         let mut genome = genome::PlantGenome::minimal_plant(&mut rng);
         genome.seed_count = 3.0;
@@ -1417,12 +1414,12 @@ mod tests {
 
         let entity = sim.spawn_plant(Position { x: 30.0, y: 15.0 }, genome);
 
-        // Set to flowering stage + high energy + past young age
+        // Set to mature stage + decent energy + past young age
         if let Ok(mut stage) = sim.world.get::<&mut PlantStage>(entity) {
-            *stage = PlantStage::Flowering;
+            *stage = PlantStage::Mature;
         }
         if let Ok(mut energy) = sim.world.get::<&mut ecosystem::Energy>(entity) {
-            energy.current = energy.max * 0.95;
+            energy.current = energy.max * 0.75;
         }
         if let Ok(mut age) = sim.world.get::<&mut PlantAge>(entity) {
             age.seconds = 50.0;
