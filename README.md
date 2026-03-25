@@ -41,7 +41,7 @@
 - **Plant genome** &mdash; 16 float genes control morphology (stem thickness, height, leaf area, branching, curvature, color) and physiology (photosynthesis rate, energy capacity, hardiness, seed dispersal, fecundity, lifespan, nutritional value), informed by ecological theory
 - **Complexity as a master gate** &mdash; a single 0.0&ndash;1.0 gene controls which morphological features are expressed in both creatures and plants; always mutates on reproduction (±0.15 drift) ensuring continuous exploration
 - **Asexual &amp; sexual reproduction** &mdash; simple cells divide asexually; complex creatures find compatible mates via genomic distance
-- **Plant reproduction** &mdash; flowering plants (energy &gt; 85%) produce mutated offspring; seed count, size, and dispersal range are genome-controlled
+- **Plant reproduction** &mdash; mature and flowering plants produce mutated offspring; seed count, size, and dispersal range are genome-controlled; 30% probability gate per interval prevents synchronized seeding
 - **Smooth complexity transitions** &mdash; gradual shift from asexual to sexual reproduction prevents evolutionary traps
 - **Complexity rewards** &mdash; higher complexity grants +50% sensory range and ~25% metabolism efficiency for creatures; +15% photosynthesis efficiency for plants
 - **Evolvable mutation rate** &mdash; `mutation_rate_factor` gene (0.5&ndash;2.0) scales the base mutation rate in both creatures and plants; meta-evolution tunes evolvability itself
@@ -76,7 +76,7 @@
 - **Plant lifecycle stages** &mdash; plants progress through Seedling &rarr; Young &rarr; Mature &rarr; Flowering &rarr; Wilting based on energy fraction and age; appearance visibly grows at each transition (height increases per stage within each complexity tier)
 - **Procedural plant ASCII art** &mdash; 4 complexity tiers (spore, sprout, medium bush, complex tree) selected by raw genome complexity; plant *size within each tier* scales with lifecycle stage so Seedlings are visibly smaller than Mature plants
 - **L-system-inspired shapes** &mdash; branching and curvature genes parameterize production rules for plant art generation (Lindenmayer, 1968)
-- **Plant reproduction** &mdash; flowering plants (&gt;85% energy) seed mutated offspring nearby; seed count, size (r/K trade-off), and dispersal range are genome-controlled
+- **Plant reproduction** &mdash; mature and flowering plants seed mutated offspring nearby; seed count, size (r/K trade-off), and dispersal range are genome-controlled; 30% probability gate per seeding interval
 - **No artificial food rain** &mdash; the ecosystem sustains itself entirely through plant photosynthesis; manual food drops still available via `f` key
 - **Nutrient cycling** &mdash; dead creatures become detritus entities (50% of max energy), which decay slowly and can be grazed
 - **Depth zones** &mdash; surface (top 30%) has full light; mid-water has 70% light; deep zone (bottom 30%) has 40% light and 15% slower metabolism
@@ -265,6 +265,7 @@ Initial plants are spawned with `minimal_plant()`:
 - **Complexity:** 0.15&ndash;0.4 (starts as sprout tier)
 - **Low values:** all morphology genes randomized 0.1&ndash;0.4
 - **Moderate physiology:** photosynthesis_rate ~1.0, balanced seed count/size
+- **Staggered start:** initial energy randomized 50&ndash;100%, initial age randomized 0&ndash;20s to desynchronize lifecycle stages
 - **Generation 0:** first generation, no parent lineage
 
 ### Primordial Cells
@@ -324,10 +325,11 @@ No artificial food is injected into the ecosystem. Energy enters only through pl
 | Plant max energy | 15 &times; max_energy_factor &times; (1 + mass) | Genome-controlled; larger plants store more |
 | Plant photosynthesis | Beer&ndash;Lambert: P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;0.5&middot;LAI</sup>) &times; rate | LAI-based light capture with diminishing returns |
 | Plant maintenance | 0.08 &times; mass<sup>0.75</sup> &times; dt | Allometric cost (Kleiber's law); equilibrium ~81% energy |
-| Plant seed threshold | &gt;85% energy + Flowering stage | Must be well-fed and mature |
+| Plant seed threshold | Mature or Flowering stage | Must be past Young stage; well-fed plants seed more reliably |
+| Plant seed probability | 30% per interval | Prevents synchronized mass seeding |
 | Plant seed interval | 5 seconds | Rate-limited reproduction |
 | Plant seed count | genome.seed_count (0.3&ndash;2.0, max 3 per cycle) | Genome-controlled fecundity |
-| Plant seed size | genome.seed_size (0.3&ndash;2.0) | Starting energy = 30% &times; max &times; seed_size |
+| Plant seed size | genome.seed_size (0.3&ndash;2.0) | Starting energy = max(30% &times; seed_size, 35%) &times; max_energy |
 | Plant lifespan | 12000&ndash;24000 ticks &times; lifespan_factor | Genome-controlled aging |
 | Plant population cap | ~tank_area/100 (min 15) | Scales with tank size |
 | Plant growth model | Logistic &times; LAI | Peaks at 50% population fill, min 0.1 factor |
