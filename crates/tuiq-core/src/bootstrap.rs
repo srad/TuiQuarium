@@ -693,8 +693,9 @@ impl super::AquariumSim {
             .min(producer_positions.len().max(1))
             .min(8);
         // Research note: real aquatic founder webs begin with a detrital /
-        // dissolved-organic background rather than perfectly clean water, so
-        // the bootstrap seeds a modest labile detritus pool around producers.
+        // dissolved-organic background rather than perfectly clean water (Azam
+        // et al., 1983), so the bootstrap seeds a modest labile detritus pool
+        // around producers.
         for packet in 0..detritus_packets {
             if remaining_detritus_energy < detritus_packet_energy {
                 break;

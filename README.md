@@ -537,6 +537,7 @@ Please make sure `cargo test --workspace` passes before submitting.
 - Christoph Adami, Charles Ofria, Travis C. Collier, [Evolution of Biological Complexity](https://www.pnas.org/doi/10.1073/pnas.97.9.4463) (PNAS, 2000) &mdash; complexity emergence via natural selection
 - Larry Yaeger, [Computational Genetics, Physiology, Metabolism, Neural Systems, Learning, Vision, and Behavior](https://web.archive.org/web/20230325141123/http://pobox.com/~larryy/Yaeger.ALife3.pdf) (ALife III, 1993) &mdash; Polyworld ecosystem simulation
 - Geoffrey Hinton & Steven Nowlan, [How Learning Can Guide Evolution](https://www.cs.toronto.edu/~hinton/absps/baldwin.pdf) (Complex Systems, 1987) &mdash; Baldwin Effect
+- Erkki Oja, [Simplified Neuron Model as a Principal Component Analyzer](https://doi.org/10.1007/BF00275687) (Journal of Mathematical Biology, 1982) &mdash; Oja's rule: self-normalizing Hebbian learning rule used for lifetime weight plasticity in creature brains
 
 ### Flocking &amp; Behavioral Models
 
@@ -556,6 +557,8 @@ Please make sure `cargo test --workspace` passes before submitting.
 - Li et al., [Vegetative Propagule Pressure and Water Depth Affect Biomass and Evenness of Submerged Macrophyte Communities](https://pmc.ncbi.nlm.nih.gov/articles/PMC4641593/) (2015) &mdash; supports local establishment limits and patch-occupancy effects on propagules
 - Thompson & Eckert, [Trade-offs between sexual and clonal reproduction in aquatic plants](https://pubmed.ncbi.nlm.nih.gov/15149401/) (2004) &mdash; supports reserve-cost dispersal vs local spread allocation
 - Ren et al., [Water depth affects submersed macrophyte more than herbivorous snail in mesotrophic lakes](https://pmc.ncbi.nlm.nih.gov/articles/PMC11140150/) (2024) &mdash; supports grazing that can reduce attached growth while depth/light remains the dominant producer driver
+- J. Philip Grime, [Evidence for the Existence of Three Primary Strategies in Plants and Its Relevance to Ecological and Evolutionary Theory](https://doi.org/10.1086/283244) (The American Naturalist, 1977) &mdash; C-S-R triangle: Competitor/Stress-tolerator/Ruderal strategies; maps to producer genome trade-offs between photosynthesis rate, hardiness, and seed count
+- Aristid Lindenmayer, [Mathematical Models for Cellular Interaction in Development](https://doi.org/10.1016/0022-5193(68)90079-9) (Journal of Theoretical Biology, 1968) &mdash; L-systems: formal grammar for modeling branching plant morphology; informs producer colony geometry from branching and curvature genes
 
 ### Allometric Scaling &amp; Metabolism
 

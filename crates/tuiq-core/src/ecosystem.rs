@@ -889,9 +889,9 @@ pub fn apply_kills(world: &mut World, kills: &[(Entity, Entity)], dt: f32) -> Fe
                     let used_from_leaf = leaf_removed * 6.0;
                     let reserve_need = (raw_demand - used_from_leaf).max(0.0);
                     // Research note: producer-derived dissolved/labile organic
-                    // carbon can fuel heterotrophic microbial loops, so simple
-                    // consumers should be able to harvest more than hard tissue
-                    // alone when grazing active producer colonies.
+                    // carbon can fuel heterotrophic microbial loops (Liu et al.,
+                    // 2020), so simple consumers should be able to harvest more
+                    // than hard tissue alone when grazing active producer colonies.
                     let max_take = prey_energy
                         .current
                         .min(prey_energy.max * (0.16 + 0.18 * hunger) * dt * 3.0);

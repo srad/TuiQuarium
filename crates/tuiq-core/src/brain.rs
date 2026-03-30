@@ -44,8 +44,9 @@
 //! ## Key Mechanisms
 //!
 //! - **Hebbian learning (Oja's rule)**: lifetime weight plasticity lets
-//!   creatures adapt within their lifespan. Learned weights are NOT inherited
-//!   (Baldwin Effect) — only the innate genome evolves.
+//!   creatures adapt within their lifespan (Oja, 1982). Learned weights are
+//!   NOT inherited (Baldwin Effect; Hinton & Nowlan, 1987) — only the innate
+//!   genome evolves.
 //!
 //! - **Neuromodulation**: Modulator nodes output a [0,1] gate that scales
 //!   the Hebbian learning rate for all connections. This lets creatures
@@ -359,7 +360,8 @@ impl InnovationTracker {
 // 1. Genomes can be crossed over and mutated without building a full brain
 // 2. Brain construction (topology sort, vector allocation) happens once
 // 3. Hebbian weight changes in the Brain are NOT written back to the genome
-//    (Baldwin Effect: learning guides evolution but isn't directly inherited)
+//    (Baldwin Effect: learning guides evolution but isn't directly inherited;
+//     Hinton & Nowlan, 1987)
 
 /// NEAT-style genome: a variable-length list of connection genes plus
 /// per-node genes (activation function, bias, role, trace decay).

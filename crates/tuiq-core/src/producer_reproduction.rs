@@ -211,7 +211,8 @@ impl super::AquariumSim {
 
             // Research note: reproductive effort is derived from realized biomass
             // maturity and reserve surplus instead of a lifecycle-stage switch,
-            // matching plant allocation models more closely than a global timer gate.
+            // matching plant allocation models more closely than a global timer
+            // gate (Thompson & Eckert, 2004).
             let surplus = (candidate.energy_current - candidate.energy_max * 0.35).max(0.0);
             let reproductive_effort = maturity.min(1.0) * reserve_ratio;
             let mut budget =
