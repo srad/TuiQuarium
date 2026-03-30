@@ -294,6 +294,10 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
             Span::styled("  ?/h", key_style),
             Span::styled("     Toggle this help screen", desc),
         ]),
+        Line::from(vec![
+            Span::styled("  p", key_style),
+            Span::styled("       Save PNG screenshot", desc),
+        ]),
         Line::from(Span::raw("")),
         Line::from(vec![Span::styled("  Status Bar", header)]),
         Line::from(vec![
@@ -417,6 +421,33 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(paragraph, popup_area);
+}
+
+/// Render a small transient notification popup (centered near the top).
+pub fn render_flash_popup(frame: &mut Frame, area: Rect, message: &str) {
+    let msg_width = message.len() as u16 + 4; // 2 border + 2 padding
+    let popup_w = msg_width.min(area.width);
+    let popup_h = 3u16.min(area.height);
+    let x = area.x + area.width.saturating_sub(popup_w) / 2;
+    let y = area.y + 2.min(area.height.saturating_sub(popup_h));
+    let popup_area = Rect::new(x, y, popup_w, popup_h);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .style(Style::default().bg(Color::Black));
+
+    let text = Paragraph::new(Line::from(Span::styled(
+        message,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .block(block)
+    .alignment(Alignment::Center);
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(text, popup_area);
 }
 
 #[cfg(test)]

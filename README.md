@@ -146,6 +146,7 @@ cargo test --workspace    # 250 passing tests (235 core + 13 render + 2 app)
 | `f` | Drop food pellet (manual only; no auto-spawning) |
 | `d` | Toggle ecology diagnostics overlay |
 | `?` / `h` | Toggle help popup (explains all HUD abbreviations) |
+| `p` | Save PNG screenshot to `tuiquarium_<timestamp>.png` |
 
 ## Architecture
 

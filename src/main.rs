@@ -12,7 +12,7 @@ use tuiq_core::components::*;
 use tuiq_core::genome::CreatureGenome;
 use tuiq_core::{AquariumSim, Simulation};
 use tuiq_render::ascii::generate_frames;
-use tuiq_render::{DisplayState, TuiRenderer};
+use tuiq_render::{DisplayState, Renderer, TuiRenderer};
 
 const MIN_SIM_SPEED: f32 = 0.5;
 const MAX_SIM_SPEED: f32 = 100.0;
@@ -156,6 +156,29 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
                         }
                         KeyCode::Char('?') | KeyCode::Char('h') => {
                             show_help = !show_help;
+                        }
+                        KeyCode::Char('p') => {
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            match tuiq_render::screenshot::screenshots_dir() {
+                                Ok(dir) => {
+                                    let path = dir.join(format!("tuiquarium_{ts}.png"));
+                                    match renderer.save_screenshot(&path) {
+                                        Ok(()) => renderer.flash_message(format!(
+                                            "Screenshot saved to {}",
+                                            path.display()
+                                        )),
+                                        Err(e) => renderer.flash_message(format!(
+                                            "Screenshot failed: {e}"
+                                        )),
+                                    }
+                                }
+                                Err(e) => renderer.flash_message(format!(
+                                    "Cannot create screenshot dir: {e}"
+                                )),
+                            }
                         }
                         _ => {}
                     }
