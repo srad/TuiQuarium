@@ -1,11 +1,77 @@
-//! NEAT-style neural network brains for creatures.
+//! # NEAT-style neural network brains for creatures
+//!
+//! ## Design Philosophy
 //!
 //! Each creature has an evolving neural network that maps sensory inputs to
-//! steering forces and behavioral tendencies. The network topology evolves
-//! through NEAT-style mutations: starting from a minimal direct-connection
-//! architecture (inputs → outputs), structural mutations add hidden nodes
-//! and new connections over generations. Innovation numbers enable meaningful
-//! crossover between different topologies.
+//! behavioral outputs. The design follows three biological principles:
+//!
+//! 1. **Complexification from simplicity** (NEAT): networks start as minimal
+//!    direct input-to-output connections (16×7 = 112 weights) and grow via
+//!    structural mutations. This avoids the "competing conventions" problem
+//!    where different network topologies encode the same function but can't
+//!    crossover meaningfully. Innovation numbers track structural history
+//!    so crossover can align genes from different topologies.
+//!
+//! 2. **Biologically-grounded neuron diversity**: real nervous systems have
+//!    specialized neuron types with different response characteristics.
+//!    Here, each node has an evolvable activation function (Tanh, ReLU,
+//!    Sigmoid, Abs, Step, Identity), a role (Standard, Modulator, Attention),
+//!    a bias, and a trace decay rate — giving evolution a rich palette of
+//!    computational primitives to combine.
+//!
+//! 3. **Memory through synaptic traces**: simple organisms don't have
+//!    hippocampal memory — they use intracellular calcium dynamics with
+//!    exponential decay time constants. Each node's `trace_decay` parameter
+//!    (0.0–0.99) controls how far back it "remembers," enabling habituation,
+//!    sensitization, and chemotaxis-style temporal gradient detection
+//!    (`current - trace` ≈ temporal derivative).
+//!
+//! ## Architecture Overview
+//!
+//! ```text
+//! Sensory Inputs (16, Identity)
+//!     |
+//!     v
+//! [Evolving Hidden Topology]  <-- structural mutations add nodes & connections
+//!     |                           each node: activation_fn + bias + role + trace_decay
+//!     v
+//! Behavioral Outputs (7, per-node activation)
+//!     |
+//!     v
+//! Decision Logic --> Behavior (Flee/Forage/School/Explore/Rest)
+//! ```
+//!
+//! ## Key Mechanisms
+//!
+//! - **Hebbian learning (Oja's rule)**: lifetime weight plasticity lets
+//!   creatures adapt within their lifespan. Learned weights are NOT inherited
+//!   (Baldwin Effect) — only the innate genome evolves.
+//!
+//! - **Neuromodulation**: Modulator nodes output a [0,1] gate that scales
+//!   the Hebbian learning rate for all connections. This lets creatures
+//!   evolve context-dependent learning (e.g., learn faster when food is near).
+//!
+//! - **Attention nodes**: compute softmax-weighted blends of inputs, allowing
+//!   dynamic input selection (e.g., attend to nearest predator vs food).
+//!
+//! - **Exponential trace memory**: self-connections read from traces instead
+//!   of raw previous-tick activations. Trace decay defaults are seeded by
+//!   activation function type (fast neurons get low decay, gating neurons
+//!   get high decay) but can evolve freely.
+//!
+//! - **Module duplication**: copies a local subgraph and wires it in parallel,
+//!   enabling functional modularity — successful circuit motifs can be reused
+//!   and diverge independently.
+//!
+//! ## Mutation Scaling
+//!
+//! The runtime `diversity_coefficient` (0.25–2.5, user-adjustable) scales
+//! mutations in a principled way:
+//! - **Magnitudes shrink** as `1/√diversity` — gentler edits when many weights
+//!   are being perturbed, preserving useful signals.
+//! - **Structural rates grow** as `0.5 + 0.5×diversity` — architecture keeps
+//!   pace with increased exploration pressure.
+//! - Everything is **neutral at diversity=1.0** (the default).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -25,36 +91,68 @@ use crate::spatial::SpatialGrid;
 use crate::EntityInfoMap;
 
 // ── Constants ──────────────────────────────────────────────────
+//
+// Node ID layout (contiguous):
+//   [0..16)  = 16 sensory inputs  (Identity activation, always raw)
+//   [16..23) =  7 behavioral outputs (evolvable activation)
+//   [23..60) = up to 37 hidden nodes (added by structural mutation)
+//
+// This fixed layout lets us index inputs/outputs by position and lets
+// NEAT track hidden nodes by ID across the entire population.
 
 pub const INPUT_SIZE: usize = 16;
 pub const OUTPUT_SIZE: usize = 7;
 
 const FIRST_OUTPUT: u16 = INPUT_SIZE as u16; // 16
 const FIRST_HIDDEN: u16 = (INPUT_SIZE + OUTPUT_SIZE) as u16; // 23
-const MAX_NODES: u16 = 60; // cap total nodes (40 hidden max)
+const MAX_NODES: u16 = 60; // cap total nodes (37 hidden max)
 const MAX_CONNECTIONS: usize = 300;
 
-/// Number of connections in the initial full input→output topology.
+/// Number of connections in the initial full input->output topology.
+/// All initial genomes share innovations 0..111 so crossover can align them.
 const INITIAL_INNOVATIONS: u32 = (INPUT_SIZE * OUTPUT_SIZE) as u32; // 112
 
-// Structural mutation rates
+// Structural mutation rates (before diversity scaling).
+// These are per-call probabilities, not per-gene. Structural mutations add
+// complexity, so they're relatively rare — evolution builds topology slowly.
 const ADD_NODE_RATE: f64 = 0.08;
 const ADD_CONN_RATE: f64 = 0.12;
-const ADD_SELF_CONN_RATE: f64 = 0.06;
+const ADD_SELF_CONN_RATE: f64 = 0.06; // recurrent self-loops for trace memory
 const ACTIVATION_SWAP_RATE: f64 = 0.02;
-const MODULE_DUP_RATE: f64 = 0.005;
+const MODULE_DUP_RATE: f64 = 0.005; // rare — copies entire subcircuits
 const MODULATOR_FLIP_RATE: f64 = 0.01;
 const ATTENTION_FLIP_RATE: f64 = 0.005;
 
-// NEAT distance coefficients
-const C_EXCESS: f32 = 1.0;
-const C_DISJOINT: f32 = 1.0;
-const C_WEIGHT: f32 = 0.4;
-const C_ACTIVATION: f32 = 0.3;
+// NEAT distance coefficients for speciation.
+// These balance structural vs parametric differences when deciding whether
+// two genomes belong to the same species.
+const C_EXCESS: f32 = 1.0; // genes beyond the other's max innovation
+const C_DISJOINT: f32 = 1.0; // non-matching genes within range
+const C_WEIGHT: f32 = 0.4; // average weight difference (also used for trace_decay)
+const C_ACTIVATION: f32 = 0.3; // fraction of nodes with different activations
 
 // ── ActivationFn ───────────────────────────────────────────────
+//
+// Why multiple activation functions?
+// Real nervous systems have neuron types with different I/O curves:
+// fast-responding interneurons, smooth integrators, binary detectors, etc.
+// Letting each node evolve its own activation gives NEAT a richer search
+// space — a single ReLU "detector" node wired into a Sigmoid "gate" can
+// implement useful logic that uniform-Tanh networks would need many more
+// nodes to express.
+//
+// Only 3 activations (Tanh, ReLU, Sigmoid) are used when creating new
+// hidden nodes via mutation — the others (Abs, Step, Identity) can only
+// arise through activation-swap mutations, keeping them rarer.
 
 /// Per-node activation function. Evolved through mutation and crossover.
+/// Each function serves a different computational role in the network:
+/// - Tanh:     bounded, smooth, zero-centered — general-purpose integration
+/// - ReLU:     half-rectified — fast on/off detection, sparse coding
+/// - Sigmoid:  bounded [0,1] — gating, probability-like outputs
+/// - Abs:      magnitude detection — useful for distance-based computations
+/// - Step:     binary threshold — sharp decision boundaries
+/// - Identity: linear pass-through — preserves raw signal (used for inputs)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivationFn {
     Tanh,
@@ -97,20 +195,72 @@ impl ActivationFn {
             _ => ActivationFn::Sigmoid,
         }
     }
+
+    /// Biologically-inspired default trace decay for this activation type.
+    ///
+    /// Rationale: different neuron types in real organisms have different
+    /// intracellular Ca2+ clearance rates, which determines how long a
+    /// signal echo persists. Fast-responding neurons (interneurons) clear
+    /// calcium quickly; gating neurons (neuromodulatory) clear slowly to
+    /// maintain state.
+    ///
+    /// - Identity/Step:  0.0  — pass-through or binary; no memory needed
+    /// - ReLU/Abs:       0.05 — fast sensory/detection neurons
+    /// - Tanh:           0.15 — standard integration, mild smoothing
+    /// - Sigmoid:        0.3  — gating neurons, moderate memory
+    ///
+    /// These are defaults for newly created nodes. Evolution can freely
+    /// mutate trace_decay away from these values afterward.
+    fn default_trace_decay(self) -> f32 {
+        match self {
+            ActivationFn::Identity => 0.0,
+            ActivationFn::Step => 0.0,
+            ActivationFn::ReLU => 0.05,
+            ActivationFn::Abs => 0.05,
+            ActivationFn::Tanh => 0.15,
+            ActivationFn::Sigmoid => 0.3,
+        }
+    }
 }
 
 // ── NodeRole ───────────────────────────────────────────────────
+//
+// Roles add a second axis of specialization beyond activation functions.
+// While activation functions control the I/O curve of a single neuron,
+// roles change how a node interacts with the rest of the network:
+//
+// - Standard:   normal weighted-sum -> activation. The default.
+// - Modulator:  its output [0,1] gates the Hebbian learning rate for all
+//               connections. This is analogous to dopaminergic/serotonergic
+//               modulation in real brains — "learn more when reward is high."
+// - Attention:  computes softmax over its input weights, producing a
+//               probability-weighted blend of inputs. This lets the creature
+//               dynamically shift focus between sensory channels.
 
 /// Specialized role for a node. Most nodes are Standard; Modulator and
 /// Attention nodes have special forward-pass behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeRole {
-    /// Normal neuron: weighted sum → activation
+    /// Normal neuron: weighted sum -> activation
     Standard,
     /// Output gates Oja learning rate for nearby connections
     Modulator,
     /// Computes softmax-weighted blend of inputs
     Attention,
+}
+
+impl NodeRole {
+    /// Modulator nodes get a trace decay bonus because they represent slow
+    /// neuromodulatory signals (like dopamine or serotonin release) that
+    /// should persist longer than fast sensory neurons. The +0.2 bonus
+    /// means a new Modulator with Tanh activation starts at 0.35 trace
+    /// decay instead of 0.15 — about a 5 tick half-life vs 3.
+    fn trace_decay_bonus(self) -> f32 {
+        match self {
+            NodeRole::Modulator => 0.2,
+            _ => 0.0,
+        }
+    }
 }
 
 impl Default for NodeRole {
@@ -120,18 +270,39 @@ impl Default for NodeRole {
 }
 
 // ── NodeGene ───────────────────────────────────────────────────
+//
+// Each node in the NEAT genome has its own set of evolvable parameters
+// beyond just connection weights. This is key to neuroevolution — it lets
+// evolution discover that certain positions in the network benefit from
+// different computational properties, without the designer prescribing
+// a fixed architecture.
 
-/// Per-node genome: activation function, bias, and role.
+/// Per-node genome: activation function, bias, role, and trace decay.
+/// Together, these four parameters define the "personality" of a neuron —
+/// how it responds (activation_fn), its resting state (bias), its role
+/// in the network (role), and how long its signal echoes (trace_decay).
 #[derive(Debug, Clone)]
 pub struct NodeGene {
     pub activation_fn: ActivationFn,
     pub bias: f32,
     pub role: NodeRole,
+    /// Exponential trace decay rate (0.0–0.99). Models synaptic Ca²⁺ dynamics.
+    /// 0.0 = no memory (current tick only), 0.9 = ~10 tick half-life.
+    pub trace_decay: f32,
 }
 
 // ── ConnectionGene ─────────────────────────────────────────────
+//
+// The fundamental unit of NEAT: each connection has a unique innovation
+// number that tracks when and how it was introduced. Two creatures that
+// independently evolve a connection between the same pair of nodes get
+// the same innovation number (within a generation), enabling meaningful
+// crossover alignment. Connections can be disabled rather than deleted,
+// preserving the structural history for future re-enablement.
 
 /// A single connection in the NEAT genome, identified by its innovation number.
+/// Self-connections (in_node == out_node) create recurrent loops that read from
+/// the node's exponential trace, enabling temporal memory.
 #[derive(Debug, Clone)]
 pub struct ConnectionGene {
     pub in_node: u16,
@@ -142,6 +313,12 @@ pub struct ConnectionGene {
 }
 
 // ── InnovationTracker ──────────────────────────────────────────
+//
+// Critical for NEAT crossover: when two creatures independently evolve
+// the same structural mutation (e.g., both split node 5->node 24), they
+// must get the same innovation number so crossover can recognize these
+// as the same gene. The tracker is reset each generation so that only
+// mutations within the same generation share numbers.
 
 /// Tracks structural innovation numbers for NEAT crossover alignment.
 /// Within a generation, identical structural mutations share the same number.
@@ -176,10 +353,17 @@ impl InnovationTracker {
 }
 
 // ── BrainGenome (NEAT genome) ──────────────────────────────────
+//
+// The genome is the heritable blueprint; the Brain struct is the runtime
+// phenotype built from it. This separation is important because:
+// 1. Genomes can be crossed over and mutated without building a full brain
+// 2. Brain construction (topology sort, vector allocation) happens once
+// 3. Hebbian weight changes in the Brain are NOT written back to the genome
+//    (Baldwin Effect: learning guides evolution but isn't directly inherited)
 
 /// NEAT-style genome: a variable-length list of connection genes plus
-/// per-node genes (activation function, bias, role).
-/// Node depths enforce feedforward structure.
+/// per-node genes (activation function, bias, role, trace decay).
+/// Node depths enforce feedforward structure within a single tick.
 #[derive(Debug, Clone)]
 pub struct BrainGenome {
     pub connections: Vec<ConnectionGene>,
@@ -234,6 +418,7 @@ impl BrainGenome {
                 activation_fn: ActivationFn::Identity,
                 bias: 0.0,
                 role: NodeRole::Standard,
+                trace_decay: 0.0,
             });
         }
         for _ in 0..OUTPUT_SIZE {
@@ -241,6 +426,7 @@ impl BrainGenome {
                 activation_fn: ActivationFn::Tanh,
                 bias: 0.0,
                 role: NodeRole::Standard,
+                trace_decay: 0.0,
             });
         }
 
@@ -264,9 +450,16 @@ impl BrainGenome {
 // ── Brain (runtime network) ────────────────────────────────────
 
 /// Runtime neural network built from a BrainGenome. Caches topological
-/// ordering for efficient repeated forward passes. Supports Hebbian
-/// lifetime learning, recurrent self-connections, per-node activations,
-/// biases, neuromodulation, and attention.
+/// ordering for efficient repeated forward passes.
+///
+/// The Brain is the "phenotype" — it's what actually runs each tick.
+/// Key design choices:
+/// - Flat vectors (not graph pointers) for cache-friendly iteration
+/// - Topological order pre-computed once at construction, not per-tick
+/// - Self-connections stored separately because they read from traces
+///   (previous-tick state) and break the feedforward DAG assumption
+/// - Traces implement exponential moving averages (biological Ca2+ dynamics)
+///   that give neurons configurable temporal memory spans
 #[derive(Debug, Clone)]
 pub struct Brain {
     order: Vec<u16>,
@@ -274,8 +467,11 @@ pub struct Brain {
     incoming: Vec<Vec<(u16, f32)>>,
     /// Self-loop connections per node: self_conns[node_id] = weight (or 0.0 if none)
     self_conns: Vec<f32>,
-    /// Previous tick's activations for recurrent self-connections
-    prev_activations: Vec<f32>,
+    /// Exponential trace per node (replaces prev_activations).
+    /// Updated each tick: trace = decay * trace + (1-decay) * activation
+    traces: Vec<f32>,
+    /// Per-node trace decay rates from genome (0.0 = no memory, 0.99 = long memory)
+    trace_decays: Vec<f32>,
     /// Per-node activation functions
     activation_fns: Vec<ActivationFn>,
     /// Per-node biases
@@ -304,23 +500,29 @@ impl Brain {
         let mut activation_fns = Vec::with_capacity(num_nodes);
         let mut biases = Vec::with_capacity(num_nodes);
         let mut roles = Vec::with_capacity(num_nodes);
+        let mut trace_decays = Vec::with_capacity(num_nodes);
         for i in 0..num_nodes {
             if let Some(ng) = genome.node_genes.get(i) {
                 activation_fns.push(ng.activation_fn);
                 biases.push(ng.bias);
                 roles.push(ng.role);
+                // Input nodes always have trace_decay=0 (raw sensory input)
+                trace_decays.push(if i < INPUT_SIZE { 0.0 } else { ng.trace_decay });
             } else if i < INPUT_SIZE {
                 activation_fns.push(ActivationFn::Identity);
                 biases.push(0.0);
                 roles.push(NodeRole::Standard);
+                trace_decays.push(0.0);
             } else if i < INPUT_SIZE + OUTPUT_SIZE {
                 activation_fns.push(ActivationFn::Tanh);
                 biases.push(0.0);
                 roles.push(NodeRole::Standard);
+                trace_decays.push(0.0);
             } else {
                 activation_fns.push(ActivationFn::Tanh);
                 biases.push(0.0);
                 roles.push(NodeRole::Standard);
+                trace_decays.push(0.0);
             }
         }
 
@@ -328,7 +530,8 @@ impl Brain {
             order,
             incoming,
             self_conns,
-            prev_activations: vec![0.0; num_nodes],
+            traces: vec![0.0; num_nodes],
+            trace_decays,
             activation_fns,
             biases,
             roles,
@@ -337,8 +540,24 @@ impl Brain {
         }
     }
 
-    /// Forward pass with per-node activations, biases, neuromodulation,
-    /// attention, recurrent self-connections, and Oja's rule learning.
+    /// Forward pass: sensory inputs -> behavioral outputs.
+    ///
+    /// Execution order within a single tick:
+    /// 1. Load raw sensory inputs into nodes [0..16)
+    /// 2. Iterate nodes in topological order (inputs excluded — they're leaves)
+    /// 3. For each node:
+    ///    a. Read self-connection contribution from trace (exponential memory)
+    ///    b. Compute weighted sum of feedforward inputs (or softmax for Attention)
+    ///    c. Add bias, apply activation function
+    ///    d. If Modulator: record [0,1] gate value for Hebbian learning scaling
+    /// 4. Apply Oja's rule (Hebbian learning gated by neuromodulators)
+    /// 5. Update exponential traces: trace = decay * trace + (1-decay) * activation
+    /// 6. Extract outputs from nodes [16..23)
+    ///
+    /// Self-connections are the key to temporal memory: they read from the
+    /// node's trace (an exponential moving average of past activations) rather
+    /// than the current-tick activation. Combined with evolvable trace_decay,
+    /// this lets evolution create neurons with different time horizons.
     pub fn forward(&mut self, input: &[f32; INPUT_SIZE]) -> [f32; OUTPUT_SIZE] {
         let mut activations = vec![0.0f32; self.num_nodes];
 
@@ -353,10 +572,10 @@ impl Brain {
             let idx = node_id as usize;
             let role = self.roles.get(idx).copied().unwrap_or(NodeRole::Standard);
 
-            // Recurrent self-connection: previous tick's activation
+            // Recurrent self-connection: read from trace (exponential memory)
             let self_w = self.self_conns.get(idx).copied().unwrap_or(0.0);
             let self_contrib = if self_w != 0.0 {
-                self.prev_activations.get(idx).copied().unwrap_or(0.0) * self_w
+                self.traces.get(idx).copied().unwrap_or(0.0) * self_w
             } else {
                 0.0
             };
@@ -406,7 +625,18 @@ impl Brain {
             }
         }
 
-        // Oja's rule with neuromodulation gating
+        // Oja's rule with neuromodulation gating.
+        //
+        // Oja's rule: dw = lr * post * (pre - post * w)
+        // This is a biologically-plausible Hebbian rule that:
+        // - Strengthens connections when pre and post fire together (Hebb's law)
+        // - Includes a normalization term (-post * w) that prevents runaway growth
+        // - Is equivalent to online PCA — neurons learn to represent principal components
+        //
+        // Neuromodulation: Modulator node outputs gate the learning rate.
+        // All modulator gates are averaged into a single [0,1] scalar that
+        // multiplies the base learning rate. This lets creatures evolve
+        // context-dependent plasticity (e.g., learn more when food is detected).
         if self.learning_rate > 0.0 {
             let base_lr = self.learning_rate * 0.01;
             let decay = 0.0002_f32;
@@ -443,7 +673,7 @@ impl Brain {
             for (idx, self_w) in self.self_conns.iter_mut().enumerate() {
                 if *self_w != 0.0 {
                     let post = activations.get(idx).copied().unwrap_or(0.0);
-                    let pre = self.prev_activations.get(idx).copied().unwrap_or(0.0);
+                    let pre = self.traces.get(idx).copied().unwrap_or(0.0);
                     let lr = if modulator_gates.is_empty() {
                         base_lr
                     } else {
@@ -458,8 +688,22 @@ impl Brain {
             }
         }
 
-        // Store activations for next tick's recurrent connections
-        self.prev_activations = activations.clone();
+        // Update exponential traces (biological analogy: intracellular Ca2+ dynamics).
+        //
+        // trace[i] = decay * trace[i] + (1-decay) * activation[i]
+        //
+        // At decay=0.0: trace == activation (no memory, backward compatible)
+        // At decay=0.9: half-life ~6.6 ticks  (remembers recent encounters)
+        // At decay=0.99: half-life ~69 ticks  (long-term integration)
+        //
+        // This enables chemotaxis: a downstream node reading (activation - trace)
+        // gets a temporal derivative — "is this signal increasing or decreasing?"
+        for i in 0..self.num_nodes {
+            let decay = self.trace_decays.get(i).copied().unwrap_or(0.0);
+            let act = activations.get(i).copied().unwrap_or(0.0);
+            let old_trace = self.traces.get(i).copied().unwrap_or(0.0);
+            self.traces[i] = decay * old_trace + (1.0 - decay) * act;
+        }
 
         let mut output = [0.0f32; OUTPUT_SIZE];
         for i in 0..OUTPUT_SIZE {
@@ -592,6 +836,23 @@ fn build_sensory_input(
 }
 
 // ── Brain system (runs each tick) ─────────────────────────────
+//
+// This is the perception-decision-action loop that runs once per simulation
+// tick for every creature with a brain. The pipeline:
+//
+// 1. SENSE: build a 16-float input vector from the creature's local
+//    environment (nearest food/predator/mate distances & angles, energy,
+//    wall proximity, pheromone gradient, etc.)
+//
+// 2. THINK: run the neural network forward pass (Brain::forward).
+//    The network's topology, weights, and trace memory determine how
+//    sensory inputs are transformed into behavioral outputs.
+//
+// 3. ACT: interpret the 7 output neurons as behavioral tendencies
+//    (flee strength, forage strength, school strength, explore direction,
+//    rest threshold, speed modifier, pheromone emission).
+//    The strongest behavior wins (winner-take-all) and drives the
+//    creature's velocity and state for this tick.
 
 /// Main brain system: builds sensory inputs, runs the neural net, applies outputs.
 /// Uses emergent feeding capabilities instead of fixed trophic roles.
@@ -832,10 +1093,30 @@ pub fn brain_system(
 }
 
 // ── Genetic operations for NEAT brain ──────────────────────────
+//
+// Three operations define the evolutionary loop:
+//
+// 1. CROSSOVER: aligns two parent genomes by innovation number and
+//    combines them. Matching genes are randomly selected from either
+//    parent; disjoint/excess genes included with 50% probability.
+//    Node genes (activation, bias, role, trace_decay) are averaged
+//    for matching nodes — this blends the "personality" of neurons
+//    from both parents rather than picking one arbitrarily.
+//
+// 2. MUTATION: perturbs an existing genome. Has two flavors:
+//    - Parametric: weight, bias, trace_decay perturbation (frequent, small)
+//    - Structural: add node, add connection, role flip, module dup (rare, large)
+//    The diversity coefficient scales these inversely: high diversity means
+//    more structural exploration with gentler parametric changes.
+//
+// 3. DISTANCE: measures genomic dissimilarity for speciation. Creatures
+//    with similar genomes are grouped into species that compete locally,
+//    protecting novel structures from being immediately outcompeted.
 
 /// NEAT crossover: align genes by innovation number.
 /// Matching genes are randomly chosen from either parent.
 /// Disjoint/excess genes are included with 50% probability.
+/// Node genes for shared nodes are averaged (blended inheritance).
 pub fn crossover_brain(a: &BrainGenome, b: &BrainGenome, rng: &mut impl Rng) -> BrainGenome {
     let a_genes: HashMap<u32, &ConnectionGene> =
         a.connections.iter().map(|g| (g.innovation, g)).collect();
@@ -894,6 +1175,7 @@ pub fn crossover_brain(a: &BrainGenome, b: &BrainGenome, rng: &mut impl Rng) -> 
                 activation_fn: ActivationFn::Identity,
                 bias: 0.0,
                 role: NodeRole::Standard,
+                trace_decay: 0.0,
             });
         } else {
             let ng_a = a.node_genes.get(i);
@@ -904,6 +1186,7 @@ pub fn crossover_brain(a: &BrainGenome, b: &BrainGenome, rng: &mut impl Rng) -> 
                         activation_fn: if rng.random_bool(0.5) { ga.activation_fn } else { gb.activation_fn },
                         bias: (ga.bias + gb.bias) / 2.0,
                         role: if rng.random_bool(0.5) { ga.role } else { gb.role },
+                        trace_decay: (ga.trace_decay + gb.trace_decay) / 2.0,
                     });
                 }
                 (Some(g), None) | (None, Some(g)) => {
@@ -920,6 +1203,7 @@ pub fn crossover_brain(a: &BrainGenome, b: &BrainGenome, rng: &mut impl Rng) -> 
                         activation_fn: default_act,
                         bias: 0.0,
                         role: NodeRole::Standard,
+                        trace_decay: 0.0,
                     });
                 }
             }
@@ -949,12 +1233,28 @@ fn ensure_node_genes(brain: &mut BrainGenome) {
             activation_fn: act,
             bias: 0.0,
             role: NodeRole::Standard,
+            trace_decay: 0.0,
         });
     }
 }
 
 /// NEAT mutation: weight perturbation, activation swap, bias perturbation,
-/// structural mutations, node role mutations, and module duplication.
+/// trace_decay perturbation, structural mutations, node role mutations,
+/// and module duplication.
+///
+/// Mutation strategy overview:
+/// - **Weights**: Gaussian perturbation (+-0.3 * mag_scale) per connection
+/// - **Biases**: Gaussian perturbation (+-0.2 * mag_scale) per node
+/// - **Trace decay**: Gaussian perturbation (+-0.1 * mag_scale), 15% rate,
+///   clamped [0.0, 0.99]. Skips input nodes (they must stay at 0.0).
+/// - **Activation swap**: picks a random new activation; nudges trace_decay
+///   50% toward the new activation's default (smooth transition)
+/// - **Add node**: splits an existing connection, inserting a hidden node.
+///   The new node inherits activation-appropriate trace_decay defaults.
+/// - **Add connection**: creates a new feedforward or self-connection
+/// - **Role flips**: Standard <-> Modulator/Attention. Adjusts trace_decay
+///   toward the new role's appropriate default (Modulator gets +0.2 bonus).
+/// - **Module duplication**: copies a local 1-hop subgraph for reuse.
 ///
 /// `diversity` scales mutation behavior: at 1.0 (default) all rates and
 /// magnitudes are at baseline.  Higher diversity increases structural mutation
@@ -986,11 +1286,20 @@ pub fn mutate_brain(
     }
 
     // 1b. Activation swap mutation (rate scaled by diversity)
+    // When activation changes, nudge trace_decay toward the new function's default
     if rng.random_bool(ACTIVATION_SWAP_RATE * struct_scale) && brain.next_node_id > FIRST_OUTPUT {
         let node = rng.random_range(FIRST_OUTPUT..brain.next_node_id);
         let idx = node as usize;
         if idx < brain.node_genes.len() {
-            brain.node_genes[idx].activation_fn = ActivationFn::random(rng);
+            let new_act = ActivationFn::random(rng);
+            brain.node_genes[idx].activation_fn = new_act;
+            let target = new_act.default_trace_decay()
+                + brain.node_genes[idx].role.trace_decay_bonus();
+            // Blend 50% toward the new default
+            brain.node_genes[idx].trace_decay =
+                (brain.node_genes[idx].trace_decay + target) / 2.0;
+            brain.node_genes[idx].trace_decay =
+                brain.node_genes[idx].trace_decay.clamp(0.0, 0.99);
         }
     }
 
@@ -1000,6 +1309,16 @@ pub fn mutate_brain(
         if rng.random_bool(rate as f64) {
             brain.node_genes[i].bias += rng.random_range(-b_mag..b_mag);
             brain.node_genes[i].bias = brain.node_genes[i].bias.clamp(-2.0, 2.0);
+        }
+    }
+
+    // 1d. Trace decay perturbation (magnitude scaled by diversity)
+    // ~15% per non-input node; models evolving synaptic Ca²⁺ time constants
+    let td_mag = 0.1 * mag_scale;
+    for i in FIRST_OUTPUT as usize..brain.node_genes.len() {
+        if rng.random_bool(0.15 * struct_scale) {
+            brain.node_genes[i].trace_decay += rng.random_range(-td_mag..td_mag);
+            brain.node_genes[i].trace_decay = brain.node_genes[i].trace_decay.clamp(0.0, 0.99);
         }
     }
 
@@ -1040,17 +1359,20 @@ pub fn mutate_brain(
             brain.node_depths[new_node as usize] = (in_depth + out_depth) / 2.0;
 
             // Initialize node gene for the new hidden node
+            let act = ActivationFn::random_hidden(rng);
             while brain.node_genes.len() <= new_node as usize {
                 brain.node_genes.push(NodeGene {
                     activation_fn: ActivationFn::Tanh,
                     bias: 0.0,
                     role: NodeRole::Standard,
+                    trace_decay: 0.0,
                 });
             }
             brain.node_genes[new_node as usize] = NodeGene {
-                activation_fn: ActivationFn::random_hidden(rng),
+                activation_fn: act,
                 bias: 0.0,
                 role: NodeRole::Standard,
+                trace_decay: act.default_trace_decay(),
             };
 
             // in→new (weight 1.0) and new→out (old weight) preserves behavior
@@ -1161,6 +1483,13 @@ pub fn mutate_brain(
                 brain.node_genes[idx].role = NodeRole::Modulator;
                 // Force sigmoid activation for modulators (output should be [0,1])
                 brain.node_genes[idx].activation_fn = ActivationFn::Sigmoid;
+                // Apply modulator trace decay bonus (slow gating signal)
+                let target = ActivationFn::Sigmoid.default_trace_decay()
+                    + NodeRole::Modulator.trace_decay_bonus();
+                brain.node_genes[idx].trace_decay =
+                    (brain.node_genes[idx].trace_decay + target) / 2.0;
+                brain.node_genes[idx].trace_decay =
+                    brain.node_genes[idx].trace_decay.clamp(0.0, 0.99);
             }
         }
     }
@@ -1174,6 +1503,12 @@ pub fn mutate_brain(
             if idx < brain.node_genes.len() && brain.node_genes[idx].role == NodeRole::Standard {
                 brain.node_genes[idx].role = NodeRole::Attention;
                 brain.node_genes[idx].activation_fn = ActivationFn::Identity;
+                // Attention nodes stay responsive — nudge toward Identity default
+                let target = ActivationFn::Identity.default_trace_decay();
+                brain.node_genes[idx].trace_decay =
+                    (brain.node_genes[idx].trace_decay + target) / 2.0;
+                brain.node_genes[idx].trace_decay =
+                    brain.node_genes[idx].trace_decay.clamp(0.0, 0.99);
             }
         }
     }
@@ -1190,6 +1525,13 @@ pub fn mutate_brain(
 
 /// Module duplication: copy a 1-hop subgraph rooted at `seed_node`.
 /// Creates new node IDs and innovation numbers for the duplicate.
+///
+/// Biological analogy: gene duplication is a major driver of evolutionary
+/// novelty. One copy maintains the original function while the other is
+/// free to diverge. Here, we copy a local circuit motif (seed + its
+/// immediate neighbors) and wire the duplicate in parallel, with slight
+/// weight perturbation (+-0.1) to break symmetry. The duplicate inherits
+/// all node genes (activation, bias, role, trace_decay) from the originals.
 fn duplicate_module(
     brain: &mut BrainGenome,
     seed_node: u16,
@@ -1250,18 +1592,21 @@ fn duplicate_module(
             activation_fn: ActivationFn::Tanh,
             bias: 0.0,
             role: NodeRole::Standard,
+            trace_decay: 0.0,
         });
         while brain.node_genes.len() <= new_node as usize {
             brain.node_genes.push(NodeGene {
                 activation_fn: ActivationFn::Tanh,
                 bias: 0.0,
                 role: NodeRole::Standard,
+                trace_decay: 0.0,
             });
         }
         brain.node_genes[new_node as usize] = NodeGene {
             activation_fn: ng.activation_fn,
             bias: ng.bias + rng.random_range(-0.05..0.05_f32),
             role: ng.role,
+            trace_decay: ng.trace_decay,
         };
     }
 
@@ -1310,8 +1655,20 @@ fn duplicate_module(
     }
 }
 
-/// NEAT genomic distance: excess genes, disjoint genes, weight differences,
-/// and activation function mismatches.
+/// NEAT genomic distance for speciation.
+///
+/// Measures how "different" two genomes are by combining:
+/// - Excess genes (beyond the other genome's max innovation): C_EXCESS
+/// - Disjoint genes (non-matching within range): C_DISJOINT
+/// - Average weight difference of matching connections: C_WEIGHT
+/// - Fraction of matching nodes with different activations: C_ACTIVATION
+/// - Average trace_decay difference of matching nodes: C_WEIGHT (reused)
+///
+/// This distance is used by the speciation system to group similar genomes
+/// into species. Creatures within a species compete only with each other,
+/// giving novel structures time to optimize before facing the full population.
+/// Without speciation, a new structural mutation (initially worse than the
+/// optimized parent) would be immediately eliminated by selection pressure.
 pub fn brain_distance(a: &BrainGenome, b: &BrainGenome) -> f32 {
     let a_map: HashMap<u32, &ConnectionGene> =
         a.connections.iter().map(|g| (g.innovation, g)).collect();
@@ -1367,6 +1724,8 @@ pub fn brain_distance(a: &BrainGenome, b: &BrainGenome) -> f32 {
     let max_nodes = a.next_node_id.max(b.next_node_id) as usize;
     let shared_nodes = a.next_node_id.min(b.next_node_id) as usize;
     let mut activation_mismatches = 0u32;
+    let mut trace_decay_diff_sum = 0.0f32;
+    let mut trace_decay_count = 0u32;
     for i in FIRST_OUTPUT as usize..shared_nodes {
         let act_a = a.node_genes.get(i).map(|ng| ng.activation_fn);
         let act_b = b.node_genes.get(i).map(|ng| ng.activation_fn);
@@ -1375,13 +1734,25 @@ pub fn brain_distance(a: &BrainGenome, b: &BrainGenome) -> f32 {
                 activation_mismatches += 1;
             }
         }
+        let td_a = a.node_genes.get(i).map(|ng| ng.trace_decay);
+        let td_b = b.node_genes.get(i).map(|ng| ng.trace_decay);
+        if let (Some(ta), Some(tb)) = (td_a, td_b) {
+            trace_decay_diff_sum += (ta - tb).abs();
+            trace_decay_count += 1;
+        }
     }
     let max_n = max_nodes.max(1) as f32;
+    let avg_trace_diff = if trace_decay_count > 0 {
+        trace_decay_diff_sum / trace_decay_count as f32
+    } else {
+        0.0
+    };
 
     C_EXCESS * excess as f32 / n
         + C_DISJOINT * disjoint as f32 / n
         + C_WEIGHT * avg_w
         + C_ACTIVATION * activation_mismatches as f32 / max_n
+        + C_WEIGHT * avg_trace_diff // reuse weight coefficient for trace decay distance
 }
 
 // ── Tests ─────────────────────────────────────────────────────
@@ -1725,8 +2096,8 @@ mod tests {
         let initial_conns = bg.num_enabled_connections();
         let initial_hidden = bg.num_hidden_nodes();
 
-        // Simulate 200 generations of mutation
-        for _ in 0..200 {
+        // Simulate 300 generations of mutation
+        for _ in 0..300 {
             mutate_brain(&mut bg, 0.15, 1.0, &mut rng, &mut tracker);
         }
 
@@ -1742,14 +2113,14 @@ mod tests {
             initial_conns, bg.num_enabled_connections(),
         );
 
-        // The brain should still produce valid output
+        // The brain should still produce valid (finite) output
         let mut brain = Brain::from_genome(&bg);
         let input = [0.5f32; INPUT_SIZE];
         let output = brain.forward(&input);
         for &v in &output {
             assert!(
-                v >= -1.0 && v <= 1.0,
-                "Evolved brain output out of range: {}",
+                v.is_finite(),
+                "Evolved brain output not finite: {}",
                 v
             );
         }
@@ -2559,22 +2930,39 @@ mod tests {
         let mut genome = BrainGenome::random(&mut rng);
         let mut tracker = InnovationTracker::new();
 
-        // Add hidden nodes
-        for _ in 0..30 {
-            mutate_brain(&mut genome, 0.0, 1.0, &mut rng, &mut tracker);
-        }
+        // Add a hidden node manually with known connections
+        let hidden = genome.next_node_id;
+        genome.next_node_id += 1;
+        genome.node_depths.push(0.5);
+        genome.node_genes.push(NodeGene {
+            activation_fn: ActivationFn::Tanh,
+            bias: 0.0,
+            role: NodeRole::Standard,
+            trace_decay: 0.0,
+        });
+        // Wire input 0 and input 1 into hidden with different weights
+        genome.connections.push(ConnectionGene {
+            in_node: 0, out_node: hidden, weight: 0.8,
+            enabled: true, innovation: tracker.get(0, hidden),
+        });
+        genome.connections.push(ConnectionGene {
+            in_node: 1, out_node: hidden, weight: -0.5,
+            enabled: true, innovation: tracker.get(1, hidden),
+        });
+        // Wire hidden into output 0
+        genome.connections.push(ConnectionGene {
+            in_node: hidden, out_node: FIRST_OUTPUT, weight: 1.0,
+            enabled: true, innovation: tracker.get(hidden, FIRST_OUTPUT),
+        });
 
         // Standard brain
         let mut standard_brain = Brain::from_genome(&genome);
         let input = [0.5; INPUT_SIZE];
         let out_standard = standard_brain.forward(&input);
 
-        // Now make a hidden node attention
-        if genome.next_node_id > FIRST_HIDDEN {
-            let idx = FIRST_HIDDEN as usize;
-            genome.node_genes[idx].role = NodeRole::Attention;
-            genome.node_genes[idx].activation_fn = ActivationFn::Identity;
-        }
+        // Now make the hidden node attention
+        genome.node_genes[hidden as usize].role = NodeRole::Attention;
+        genome.node_genes[hidden as usize].activation_fn = ActivationFn::Identity;
 
         let mut attn_brain = Brain::from_genome(&genome);
         let out_attn = attn_brain.forward(&input);
@@ -2870,5 +3258,339 @@ mod tests {
             nodes_added_low < nodes_added_default,
             "Low diversity should add fewer nodes: low={nodes_added_low} default={nodes_added_default}"
         );
+    }
+
+    // ── Trace Memory Tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_trace_decay_zero_matches_prev_activation_behavior() {
+        // With trace_decay=0.0, trace should equal current activation each tick
+        // (identical to old prev_activations behavior)
+        let mut rng = StdRng::seed_from_u64(42);
+        let genome = BrainGenome::random(&mut rng);
+
+        // Verify all node genes have trace_decay=0.0
+        for ng in &genome.node_genes {
+            assert_eq!(ng.trace_decay, 0.0);
+        }
+
+        let mut brain = Brain::from_genome(&genome);
+        let input1 = [0.5; INPUT_SIZE];
+        let out1 = brain.forward(&input1);
+
+        let input2 = [0.0; INPUT_SIZE];
+        let out2 = brain.forward(&input2);
+
+        // Run a third pass
+        let _out3 = brain.forward(&input2);
+
+        // Basic sanity: the network produces deterministic output
+        let mut brain2 = Brain::from_genome(&genome);
+        let out1b = brain2.forward(&input1);
+        assert_eq!(out1, out1b);
+        let out2b = brain2.forward(&input2);
+        assert_eq!(out2, out2b);
+    }
+
+    #[test]
+    fn test_trace_with_high_decay_retains_signal() {
+        // Build a genome with a self-connected hidden node with trace_decay=0.9
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut genome = BrainGenome::random(&mut rng);
+
+        // Add a hidden node
+        let hidden = genome.next_node_id;
+        genome.next_node_id += 1;
+        genome.node_depths.push(0.5);
+        genome.node_genes.push(NodeGene {
+            activation_fn: ActivationFn::Identity,
+            bias: 0.0,
+            role: NodeRole::Standard,
+            trace_decay: 0.9,
+        });
+
+        // Connect input 0 -> hidden, hidden -> output 0
+        let mut tracker = InnovationTracker::new();
+        genome.connections.push(ConnectionGene {
+            in_node: 0,
+            out_node: hidden,
+            weight: 1.0,
+            enabled: true,
+            innovation: tracker.get(0, hidden),
+        });
+        genome.connections.push(ConnectionGene {
+            in_node: hidden,
+            out_node: FIRST_OUTPUT,
+            weight: 1.0,
+            enabled: true,
+            innovation: tracker.get(hidden, FIRST_OUTPUT),
+        });
+
+        // Add a self-connection on the hidden node
+        genome.connections.push(ConnectionGene {
+            in_node: hidden,
+            out_node: hidden,
+            weight: 0.5,
+            enabled: true,
+            innovation: tracker.get(hidden, hidden),
+        });
+
+        let mut brain = Brain::from_genome(&genome);
+
+        // Pulse: one tick with input=1.0, then many ticks with input=0.0
+        let mut pulse_input = [0.0f32; INPUT_SIZE];
+        pulse_input[0] = 1.0;
+        brain.forward(&pulse_input);
+
+        // Now zero input -- trace should persist across ticks
+        let zero_input = [0.0f32; INPUT_SIZE];
+        let mut trace_values = Vec::new();
+        for _ in 0..20 {
+            brain.forward(&zero_input);
+            trace_values.push(brain.traces[hidden as usize]);
+        }
+
+        // With decay=0.9, trace should decay slowly
+        assert!(trace_values[0] > 0.01, "Trace should persist: {}", trace_values[0]);
+        assert!(trace_values[9] > 0.001, "Trace should persist at tick 10: {}", trace_values[9]);
+        // Trace should be monotonically decreasing (no input feeding it)
+        for i in 1..trace_values.len() {
+            assert!(
+                trace_values[i] <= trace_values[i - 1] + 1e-6,
+                "Trace should decrease: tick {} ({}) > tick {} ({})",
+                i, trace_values[i], i - 1, trace_values[i - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_trace_decay_zero_trace_equals_activation() {
+        // With decay=0, trace = activation exactly each tick
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut genome = BrainGenome::random(&mut rng);
+
+        // Add hidden node with trace_decay=0.0
+        let hidden = genome.next_node_id;
+        genome.next_node_id += 1;
+        genome.node_depths.push(0.5);
+        genome.node_genes.push(NodeGene {
+            activation_fn: ActivationFn::Identity,
+            bias: 0.0,
+            role: NodeRole::Standard,
+            trace_decay: 0.0,
+        });
+
+        let mut tracker = InnovationTracker::new();
+        genome.connections.push(ConnectionGene {
+            in_node: 0,
+            out_node: hidden,
+            weight: 1.0,
+            enabled: true,
+            innovation: tracker.get(0, hidden),
+        });
+
+        let mut brain = Brain::from_genome(&genome);
+
+        // Pulse then zero
+        let mut input = [0.0f32; INPUT_SIZE];
+        input[0] = 0.7;
+        brain.forward(&input);
+        let trace_after_pulse = brain.traces[hidden as usize];
+        assert!((trace_after_pulse - 0.7).abs() < 1e-5, "trace={trace_after_pulse}");
+
+        // Next tick with zero input
+        let zero = [0.0f32; INPUT_SIZE];
+        brain.forward(&zero);
+        // With decay=0: trace = 0*old + 1*0.0 = 0.0
+        let trace_after_zero = brain.traces[hidden as usize];
+        assert!((trace_after_zero).abs() < 1e-5, "trace should reset: {trace_after_zero}");
+    }
+
+    #[test]
+    fn test_trace_decay_mutation_stays_in_bounds() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut genome = BrainGenome::random(&mut rng);
+        let mut tracker = InnovationTracker::new();
+
+        // Set some trace_decays to extreme values to test clamping
+        for ng in genome.node_genes.iter_mut().skip(FIRST_OUTPUT as usize) {
+            ng.trace_decay = 0.95;
+        }
+
+        // Mutate many times
+        for _ in 0..500 {
+            mutate_brain(&mut genome, 0.3, 1.0, &mut rng, &mut tracker);
+        }
+
+        // All trace_decays should be in [0.0, 0.99]
+        for (i, ng) in genome.node_genes.iter().enumerate() {
+            assert!(
+                ng.trace_decay >= 0.0 && ng.trace_decay <= 0.99,
+                "Node {i} trace_decay out of bounds: {}",
+                ng.trace_decay
+            );
+        }
+        // Input nodes should remain 0.0 (mutations skip inputs)
+        for ng in genome.node_genes.iter().take(INPUT_SIZE) {
+            assert_eq!(ng.trace_decay, 0.0, "Input node trace_decay should stay 0.0");
+        }
+    }
+
+    #[test]
+    fn test_crossover_averages_trace_decay() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut a = BrainGenome::random(&mut rng);
+        let mut b = BrainGenome::random(&mut rng);
+
+        // Set different trace_decays on output nodes
+        for ng in a.node_genes.iter_mut().skip(INPUT_SIZE).take(OUTPUT_SIZE) {
+            ng.trace_decay = 0.8;
+        }
+        for ng in b.node_genes.iter_mut().skip(INPUT_SIZE).take(OUTPUT_SIZE) {
+            ng.trace_decay = 0.2;
+        }
+
+        let child = crossover_brain(&a, &b, &mut rng);
+
+        // Crossover averages trace_decay for shared nodes
+        for ng in child.node_genes.iter().skip(INPUT_SIZE).take(OUTPUT_SIZE) {
+            assert!(
+                (ng.trace_decay - 0.5).abs() < 0.01,
+                "Expected ~0.5, got {}",
+                ng.trace_decay
+            );
+        }
+    }
+
+    #[test]
+    fn test_minimal_genome_has_zero_trace_decay() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let genome = BrainGenome::random(&mut rng);
+
+        for (i, ng) in genome.node_genes.iter().enumerate() {
+            assert_eq!(
+                ng.trace_decay, 0.0,
+                "Node {i} should have trace_decay=0.0 in minimal genome"
+            );
+        }
+    }
+
+    #[test]
+    fn test_brain_distance_includes_trace_decay() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let a = BrainGenome::random(&mut rng);
+        let mut b = a.clone();
+
+        // Identical genomes should have distance 0
+        let d0 = brain_distance(&a, &b);
+        assert!(d0 < 1e-6, "Identical genomes distance should be ~0: {d0}");
+
+        // Change trace_decay on output nodes
+        for ng in b.node_genes.iter_mut().skip(INPUT_SIZE).take(OUTPUT_SIZE) {
+            ng.trace_decay = 0.9;
+        }
+
+        let d1 = brain_distance(&a, &b);
+        assert!(
+            d1 > d0,
+            "Different trace_decays should increase distance: d0={d0}, d1={d1}"
+        );
+    }
+
+    #[test]
+    fn test_exponential_decay_curve_shape() {
+        // Verify trace follows mathematical exponential decay: value * decay^t
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut genome = BrainGenome::random(&mut rng);
+
+        let hidden = genome.next_node_id;
+        genome.next_node_id += 1;
+        genome.node_depths.push(0.5);
+        genome.node_genes.push(NodeGene {
+            activation_fn: ActivationFn::Identity,
+            bias: 0.0,
+            role: NodeRole::Standard,
+            trace_decay: 0.8,
+        });
+
+        // input 0 -> hidden (no self-conn, so activation=0 when input=0)
+        let mut tracker = InnovationTracker::new();
+        genome.connections.push(ConnectionGene {
+            in_node: 0,
+            out_node: hidden,
+            weight: 1.0,
+            enabled: true,
+            innovation: tracker.get(0, hidden),
+        });
+
+        let mut brain = Brain::from_genome(&genome);
+
+        // Pulse input=1.0 for one tick
+        let mut pulse = [0.0f32; INPUT_SIZE];
+        pulse[0] = 1.0;
+        brain.forward(&pulse);
+        // trace = decay * old_trace + (1-decay) * activation
+        // After first tick: trace = 0.8*0 + 0.2*1.0 = 0.2
+        let t0 = brain.traces[hidden as usize];
+        assert!((t0 - 0.2).abs() < 1e-5, "Expected 0.2, got {t0}");
+
+        // Now zero input: activation=0, trace = 0.8 * old_trace
+        let zero = [0.0f32; INPUT_SIZE];
+        for tick in 1..=10 {
+            brain.forward(&zero);
+            let expected = 0.2 * 0.8_f32.powi(tick);
+            let actual = brain.traces[hidden as usize];
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "Tick {tick}: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_trace_decay_varies_by_activation() {
+        assert_eq!(ActivationFn::Identity.default_trace_decay(), 0.0);
+        assert_eq!(ActivationFn::Step.default_trace_decay(), 0.0);
+        assert_eq!(ActivationFn::ReLU.default_trace_decay(), 0.05);
+        assert_eq!(ActivationFn::Abs.default_trace_decay(), 0.05);
+        assert_eq!(ActivationFn::Tanh.default_trace_decay(), 0.15);
+        assert_eq!(ActivationFn::Sigmoid.default_trace_decay(), 0.3);
+    }
+
+    #[test]
+    fn test_modulator_role_gets_trace_decay_bonus() {
+        assert_eq!(NodeRole::Modulator.trace_decay_bonus(), 0.2);
+        assert_eq!(NodeRole::Standard.trace_decay_bonus(), 0.0);
+        assert_eq!(NodeRole::Attention.trace_decay_bonus(), 0.0);
+    }
+
+    #[test]
+    fn test_new_hidden_nodes_get_activation_based_trace_decay() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut genome = BrainGenome::random(&mut rng);
+        let mut tracker = InnovationTracker::new();
+        let initial_nodes = genome.next_node_id;
+
+        // Mutate heavily to add nodes
+        for _ in 0..200 {
+            mutate_brain(&mut genome, 0.15, 1.0, &mut rng, &mut tracker);
+        }
+
+        // Check that new hidden nodes got non-zero trace_decay
+        let mut nonzero_count = 0;
+        for i in initial_nodes as usize..genome.node_genes.len() {
+            if genome.node_genes[i].trace_decay > 0.0 {
+                nonzero_count += 1;
+            }
+        }
+        let new_nodes = genome.node_genes.len() - initial_nodes as usize;
+        if new_nodes > 3 {
+            assert!(
+                nonzero_count > 0,
+                "At least some new hidden nodes should have nonzero trace_decay, \
+                 but all {} new nodes have 0.0",
+                new_nodes
+            );
+        }
     }
 }

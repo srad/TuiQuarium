@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/Tests-239_passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-250_passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Alpha-yellow" alt="Status">
 </p>
@@ -60,7 +60,8 @@
 - **Neuromodulation** &mdash; hidden nodes can evolve into Modulator role (1% rate), whose sigmoid-gated output scales the Oja learning rate for all connections, enabling selective plasticity
 - **Attention mechanism** &mdash; hidden nodes can evolve into Attention role (0.5% rate), computing softmax-weighted blends of their inputs instead of simple weighted sums
 - **Module duplication** &mdash; a rare mutation (0.5% rate) copies a connected subgraph of hidden nodes with new innovation numbers, enabling functional modularity
-- **Recurrent self-connections** &mdash; hidden and output nodes can evolve self-loops that feed previous-tick activations back as input, giving creatures short-term memory without breaking feedforward topology
+- **Recurrent self-connections** &mdash; hidden and output nodes can evolve self-loops that feed trace memory back as input, giving creatures temporal memory without breaking feedforward topology
+- **Exponential trace memory** &mdash; each node has an evolvable trace decay rate (0.0&ndash;0.99) modeling synaptic Ca&sup2;+ dynamics; enables habituation, sensitization, and chemotaxis-style temporal comparison
 - **Sensory inputs** &mdash; energy, hunger, nearby food/predators/allies, walls, light, speed, pheromone concentration &amp; gradient
 - **Behavioral outputs** &mdash; steering, speed, foraging, fleeing, schooling, pheromone emission
 - **Evolved, not designed** &mdash; both weights and topology are part of the genome and evolve through crossover and mutation
@@ -128,7 +129,7 @@ The default visible run starts directly from a simple aquatic founder web:
 ### Run Tests
 
 ```bash
-cargo test --workspace    # 239 passing tests (224 core + 13 render + 2 app)
+cargo test --workspace    # 250 passing tests (235 core + 13 render + 2 app)
 ```
 
 ## Controls
@@ -230,7 +231,7 @@ Maximum topology: 60 nodes total, 300 connections. **Innovation numbers** track 
 
 **Module duplication:** When triggered, this mutation selects a random hidden node, finds all nodes within 1 connection hop, duplicates the subgraph with fresh node IDs and innovation numbers, and wires the copy's external connections analogously to the original. This enables functional modularity — successful subnetworks can be reused and diverge independently.
 
-**Recurrent self-connections:** hidden and output nodes can evolve self-loop connections where the previous tick's activation feeds back as additional input. This gives creatures short-term memory — a node's output depends not just on current sensory input but on its recent history. Self-loops are separated from the feedforward topological sort and use a dedicated activation buffer, so they don't create cycles in the forward pass.
+**Recurrent self-connections with trace memory:** hidden and output nodes can evolve self-loop connections where the node's *trace* feeds back as additional input. Unlike raw previous-tick activations, each node maintains an exponential moving average: `trace = decay * trace + (1-decay) * activation`. The evolvable `trace_decay` parameter (0.0&ndash;0.99) controls memory depth &mdash; at 0.0 the node has no memory (current tick only), at 0.9 the half-life is ~10 ticks. Default trace decay is seeded from the node's activation function: fast neurons (ReLU, Abs: 0.05), standard neurons (Tanh: 0.15), gating neurons (Sigmoid: 0.3), and modulators get an additional +0.2 bonus for slow gating. This models biological Ca&sup2;+ dynamics and enables three key behaviors: *slow integration* (accumulating evidence over time), *habituation* (trace saturates under repeated stimulus), and *temporal comparison* (`current - trace` acts as a derivative for chemotaxis-style gradient following). Self-loops are separated from the feedforward topological sort so they don't create cycles in the forward pass.
 
 ### Sensory Inputs
 
