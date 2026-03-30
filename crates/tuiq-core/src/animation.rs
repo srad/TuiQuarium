@@ -1,6 +1,6 @@
 use hecs::World;
 
-use crate::components::{Appearance, AnimationState};
+use crate::components::{AnimationState, Appearance};
 
 /// Advance animation frame timers and cycle through frames.
 pub fn animation_system(world: &mut World, dt: f32) {

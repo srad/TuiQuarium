@@ -58,7 +58,6 @@ pub struct NeedWeights {
     pub rest_rate: f32,
     pub comfort_sensitivity: f32,
     pub social_need: f32,
-    pub reproduction_rate: f32,
     pub territory_need: f32,
     pub curiosity_rate: f32,
 }
@@ -71,7 +70,6 @@ impl Default for NeedWeights {
             rest_rate: 0.01,
             comfort_sensitivity: 0.3,
             social_need: 0.5,
-            reproduction_rate: 0.02,
             territory_need: 0.0,
             curiosity_rate: 0.01,
         }
@@ -100,9 +98,6 @@ pub fn needs_tick(needs: &mut Needs, weights: &NeedWeights, dt: f32) {
     // Social need drifts toward the species baseline
     let social_target = weights.social_need;
     needs.social += (social_target - needs.social) * 0.1 * dt;
-
-    // Reproduction builds over time
-    needs.reproduction += weights.reproduction_rate * dt;
 
     // Territory need drifts toward species baseline
     let territory_target = weights.territory_need;
@@ -137,7 +132,10 @@ mod tests {
         for _ in 0..100 {
             needs_tick(&mut needs, &weights, 0.05);
         }
-        assert!(needs.safety < 0.5, "Safety concern should decay without threat");
+        assert!(
+            needs.safety < 0.5,
+            "Safety concern should decay without threat"
+        );
     }
 
     #[test]

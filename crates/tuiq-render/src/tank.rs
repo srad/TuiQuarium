@@ -1,13 +1,13 @@
 use ratatui::{
-    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     widgets::{Block, Borders},
+    Frame,
 };
 use tuiq_core::{
-    Simulation,
     components::{AnimationState, Appearance, Direction, Position},
+    Simulation,
 };
 
 use crate::effects::BubbleSystem;
@@ -87,9 +87,7 @@ pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles:
 
     // Render creatures from the ECS world
     let world = sim.world();
-    for (pos, appearance, anim) in
-        &mut world.query::<(&Position, &Appearance, &AnimationState)>()
-    {
+    for (pos, appearance, anim) in &mut world.query::<(&Position, &Appearance, &AnimationState)>() {
         render_creature(buf, inner, pos, appearance, anim);
     }
 }
@@ -97,13 +95,13 @@ pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles:
 /// Map color_index to a terminal color.
 fn creature_color(color_index: u8) -> Color {
     match color_index {
-        0 => Color::LightCyan,    // Small fish
-        1 => Color::LightYellow,  // Tropical fish
-        2 => Color::White,        // Angelfish
-        3 => Color::LightMagenta, // Jellyfish
-        4 => Color::LightRed,     // Crab
-        5 => Color::Green,        // Seaweed / plant green
-        6 => Color::Rgb(255, 165, 0), // Orange / plant brown
+        0 => Color::LightCyan,          // Small fish
+        1 => Color::LightYellow,        // Tropical fish
+        2 => Color::White,              // Angelfish
+        3 => Color::LightMagenta,       // Jellyfish
+        4 => Color::LightRed,           // Crab
+        5 => Color::Green,              // Seaweed / plant green
+        6 => Color::Rgb(255, 165, 0),   // Orange / plant brown
         7 => Color::Rgb(200, 100, 200), // Purple
         8 => Color::Rgb(0, 120, 60),    // Dark green (plants)
         9 => Color::Rgb(180, 220, 40),  // Yellow-green / lime (plants)

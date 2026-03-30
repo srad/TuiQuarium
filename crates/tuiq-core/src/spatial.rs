@@ -22,7 +22,10 @@ impl SpatialGrid {
     }
 
     fn cell_key(&self, x: f32, y: f32) -> (i32, i32) {
-        ((x / self.cell_size).floor() as i32, (y / self.cell_size).floor() as i32)
+        (
+            (x / self.cell_size).floor() as i32,
+            (y / self.cell_size).floor() as i32,
+        )
     }
 
     /// Rebuild the grid from the current world state.
@@ -32,7 +35,10 @@ impl SpatialGrid {
         }
         for (entity, pos) in &mut world.query::<(Entity, &Position)>() {
             let key = self.cell_key(pos.x, pos.y);
-            self.cells.entry(key).or_default().push((entity, pos.x, pos.y));
+            self.cells
+                .entry(key)
+                .or_default()
+                .push((entity, pos.x, pos.y));
         }
     }
 

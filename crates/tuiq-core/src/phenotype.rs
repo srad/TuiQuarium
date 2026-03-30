@@ -73,9 +73,10 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     let max_energy = 100.0 * body_mass;
 
     // Metabolism: allometric scaling (mass^0.75), more efficient at higher complexity
-    // Complex organisms have more efficient biochemistry (up to 25% reduction)
-    let complexity_efficiency = 1.0 - 0.25 * genome.complexity;
-    let base_metabolism = 0.5 * body_mass.powf(0.75) * beh.metabolism_factor * complexity_efficiency;
+    // Complex organisms have more efficient biochemistry (up to ~32% reduction)
+    let complexity_efficiency = 1.0 - 0.32 * genome.complexity;
+    let base_metabolism =
+        0.5 * body_mass.powf(0.75) * beh.metabolism_factor * complexity_efficiency;
 
     // Visual profile: bigger + brighter = more visible
     let visual_profile = (art.body_size * art.color_brightness).min(1.0);
@@ -83,10 +84,12 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     // Camouflage: inverse of brightness
     let camouflage = (1.0 - art.color_brightness).max(0.0);
 
-    // Sensory range from eye size (continuous), boosted by complexity, capped
-    // Complex nervous systems process sensory data better (up to 50% bonus)
+    // Sensory range from eye size (continuous), boosted by complexity, capped.
+    // Research note: more elaborate sensory-processing systems should pay off
+    // in encounter-limited aquatic environments, so higher complexity gets a
+    // larger perceptual bonus than the minimal founder-web baseline.
     let eye_range = 8.0 + 7.0 * art.eye_size;
-    let complexity_bonus = 1.0 + 0.5 * genome.complexity;
+    let complexity_bonus = 1.0 + 0.8 * genome.complexity;
     let sensory_range = (eye_range * art.body_size.sqrt() * complexity_bonus).min(18.0);
 
     DerivedPhysics {
@@ -107,15 +110,27 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
 pub fn derive_feeding(genome: &CreatureGenome, physics: &DerivedPhysics) -> FeedingCapability {
     let beh = &genome.behavior;
 
-    // Max prey mass: mouth_size determines what fraction of own body mass can be consumed
-    let max_prey_mass = physics.body_mass * beh.mouth_size * 2.0;
+    // Max prey mass: mouth size plus complexity determine what fraction of own
+    // body mass can be processed as mobile prey.
+    let max_prey_mass = physics.body_mass * beh.mouth_size * (1.6 + 0.9 * genome.complexity);
 
-    // Hunt skill: fast, aggressive, big-mouthed creatures are good hunters
-    let hunt_skill = beh.aggression * beh.mouth_size * (physics.max_speed / 5.0).min(1.0)
-        * beh.hunting_instinct;
+    // Simulation assumption: higher-complexity consumers should gain more from
+    // sensory/motor investment, which opens a distinct hunter niche instead of
+    // letting all low-complexity grazers collapse to one strategy.
+    let hunt_skill = beh.aggression
+        * beh.mouth_size
+        * (physics.max_speed / 5.0).min(1.0)
+        * beh.hunting_instinct
+        * (0.8 + genome.complexity * 1.1)
+        * (0.75 + physics.sensory_range / 18.0 * 0.55);
 
-    // Graze skill: passive, small-mouthed creatures are good grazers
-    let graze_skill = (1.0 - beh.aggression) * (1.0 - beh.mouth_size * 0.5) * 0.5 + 0.5;
+    // Simulation assumption: simpler, chemically sensitive forms retain an
+    // advantage on attached producers and detrital patches, creating a grazer
+    // niche that does not disappear when hunter traits improve.
+    let graze_skill = ((1.0 - beh.aggression) * (1.0 - beh.mouth_size * 0.45) * 0.45 + 0.45)
+        * (0.90
+            + (1.0 - genome.complexity).clamp(0.0, 1.0) * 0.20
+            + beh.pheromone_sensitivity * 0.18);
 
     FeedingCapability {
         max_prey_mass,
@@ -125,8 +140,8 @@ pub fn derive_feeding(genome: &CreatureGenome, physics: &DerivedPhysics) -> Feed
     }
 }
 
-/// Derive physical stats for a plant from its genome.
-/// Uses allometric scaling and LAI-based photosynthesis model.
+/// Derive physical stats for an aquatic producer colony from its genome.
+/// Uses allometric scaling and capture-area-based photosynthesis.
 ///
 /// Key ecological models applied:
 /// - Allometric metabolism: maintenance ∝ mass^0.75
@@ -135,9 +150,9 @@ pub fn derive_feeding(genome: &CreatureGenome, physics: &DerivedPhysics) -> Feed
 ///   (Beer–Lambert law applied to leaf area index light interception)
 /// - Complexity efficiency: more complex plants have slightly better biochemistry
 ///   (+15% at complexity = 1.0)
-pub fn derive_plant_physics(genome: &crate::genome::PlantGenome) -> DerivedPhysics {
-    let mass = genome.plant_mass();
-    let lai = genome.effective_lai();
+pub fn derive_producer_physics(genome: &crate::genome::ProducerGenome) -> DerivedPhysics {
+    let mass = genome.producer_mass();
+    let lai = genome.effective_capture_area();
 
     // Max energy scales with mass and storage factor
     let max_energy = 15.0 * genome.max_energy_factor * (1.0 + mass);
@@ -147,7 +162,10 @@ pub fn derive_plant_physics(genome: &crate::genome::PlantGenome) -> DerivedPhysi
     let light_capture = 1.0 - (-0.5 * lai).exp();
     // base_metabolism is NEGATIVE for producers (photosynthesis)
     // Magnitude is the photosynthesis strength
-    let base_photo = 0.25 * genome.photosynthesis_rate * (0.5 + light_capture);
+    // Research note: default aquatic producer colonies in clear water should
+    // maintain a modest positive daily carbon balance unless shading, grazing,
+    // or nutrient limitation pushes them negative.
+    let base_photo = 0.70 * genome.photosynthesis_rate * (0.5 + light_capture);
 
     // Complexity efficiency: more complex plants photosynthesize slightly better
     let complexity_bonus = 1.0 + 0.15 * genome.complexity;
@@ -172,9 +190,11 @@ pub fn derive_plant_physics(genome: &crate::genome::PlantGenome) -> DerivedPhysi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn make_genome(elongation: f32, size: f32) -> CreatureGenome {
-        let mut g = CreatureGenome::random(&mut rand::rng());
+        let mut g = CreatureGenome::random(&mut StdRng::seed_from_u64(42));
         g.art.body_elongation = elongation;
         g.art.body_size = size;
         g.behavior.speed_factor = 1.0;
@@ -217,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_bright_more_visible() {
-        let mut bright = CreatureGenome::random(&mut rand::rng());
+        let mut bright = CreatureGenome::random(&mut StdRng::seed_from_u64(42));
         bright.art.color_brightness = 1.0;
         let mut dull = bright.clone();
         dull.art.color_brightness = 0.0;
@@ -229,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_all_random_genomes_valid() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..200 {
             let g = CreatureGenome::random(&mut rng);
             let p = derive_physics(&g);
@@ -243,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_feeding_capability() {
-        let mut g = CreatureGenome::random(&mut rand::rng());
+        let mut g = CreatureGenome::random(&mut StdRng::seed_from_u64(42));
         // Big aggressive hunter
         g.behavior.mouth_size = 0.8;
         g.behavior.aggression = 0.9;
@@ -259,12 +279,15 @@ mod tests {
         g.behavior.hunting_instinct = 0.1;
         let p2 = derive_physics(&g);
         let f2 = derive_feeding(&g, &p2);
-        assert!(f2.graze_skill > f2.hunt_skill, "Passive creature should be better at grazing");
+        assert!(
+            f2.graze_skill > f2.hunt_skill,
+            "Passive creature should be better at grazing"
+        );
     }
 
     #[test]
     fn test_minimal_cells_valid() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let g = CreatureGenome::minimal_cell(&mut rng);
             let p = derive_physics(&g);
@@ -277,10 +300,10 @@ mod tests {
 
     /// Hypothesis test: higher complexity gives better sensory range.
     /// A creature at complexity 0.8 should see farther than an identical
-    /// creature at complexity 0.0 (due to 1.0 + 0.5*complexity multiplier).
+    /// creature at complexity 0.0 (due to 1.0 + 0.8*complexity multiplier).
     #[test]
     fn test_complexity_improves_sensory_range() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..50 {
             let mut g_simple = CreatureGenome::random(&mut rng);
             g_simple.complexity = 0.0;
@@ -294,17 +317,18 @@ mod tests {
                 p_complex.sensory_range >= p_simple.sensory_range,
                 "Complex creature (c=0.8) should see at least as far as simple (c=0.0): \
                  complex={:.2} vs simple={:.2}",
-                p_complex.sensory_range, p_simple.sensory_range,
+                p_complex.sensory_range,
+                p_simple.sensory_range,
             );
         }
     }
 
     /// Hypothesis test: higher complexity reduces metabolism.
     /// A creature at complexity 0.8 should burn less energy than an identical
-    /// creature at complexity 0.0 (due to 1.0 - 0.25*complexity efficiency).
+    /// creature at complexity 0.0 (due to 1.0 - 0.32*complexity efficiency).
     #[test]
     fn test_complexity_reduces_metabolism() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..50 {
             let mut g_simple = CreatureGenome::random(&mut rng);
             g_simple.complexity = 0.0;
@@ -318,14 +342,15 @@ mod tests {
                 p_complex.base_metabolism < p_simple.base_metabolism,
                 "Complex creature (c=0.8) should have lower metabolism than simple (c=0.0): \
                  complex={:.4} vs simple={:.4}",
-                p_complex.base_metabolism, p_simple.base_metabolism,
+                p_complex.base_metabolism,
+                p_simple.base_metabolism,
             );
 
-            // Verify the efficiency is ~20% reduction (0.8 * 0.25 = 0.20)
+            // Verify the efficiency is ~25.6% reduction (0.8 * 0.32 = 0.256)
             let ratio = p_complex.base_metabolism / p_simple.base_metabolism;
             assert!(
-                (ratio - 0.80).abs() < 0.01,
-                "Metabolism ratio should be ~0.80 at complexity 0.8, got {:.4}",
+                (ratio - 0.744).abs() < 0.01,
+                "Metabolism ratio should be ~0.744 at complexity 0.8, got {:.4}",
                 ratio,
             );
         }
@@ -333,7 +358,7 @@ mod tests {
 
     #[test]
     fn test_sensory_range_cap_at_18() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut genome = CreatureGenome::random(&mut rng);
         genome.art.eye_size = 1.0;
         genome.art.body_size = 1.5;
@@ -353,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_complexity_increases_sensory_range() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut simple = CreatureGenome::random(&mut rng);
         simple.complexity = 0.0;
         simple.art.eye_size = 0.5;
@@ -374,12 +399,15 @@ mod tests {
     }
 
     #[test]
-    fn test_plant_physics_valid() {
-        let mut rng = rand::rng();
+    fn test_producer_physics_valid() {
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..200 {
-            let g = crate::genome::PlantGenome::random(&mut rng);
-            let p = derive_plant_physics(&g);
-            assert!(p.base_metabolism < 0.0, "Plant metabolism should be negative (producer)");
+            let g = crate::genome::ProducerGenome::random(&mut rng);
+            let p = derive_producer_physics(&g);
+            assert!(
+                p.base_metabolism < 0.0,
+                "Plant metabolism should be negative (producer)"
+            );
             assert!(p.max_energy > 0.0, "Plant max_energy must be positive");
             assert!(p.body_mass > 0.0, "Plant mass must be positive");
             assert_eq!(p.max_speed, 0.0, "Plants don't move");
@@ -387,29 +415,30 @@ mod tests {
     }
 
     #[test]
-    fn test_plant_lai_affects_photosynthesis() {
-        let mut rng = rand::rng();
-        let mut sparse = crate::genome::PlantGenome::minimal_plant(&mut rng);
+    fn test_producer_capture_area_affects_photosynthesis() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut sparse = crate::genome::ProducerGenome::minimal_producer(&mut rng);
         sparse.leaf_area = 0.1;
         sparse.branching = 0.0;
         let mut dense = sparse.clone();
         dense.leaf_area = 0.9;
         dense.branching = 0.8;
 
-        let p_sparse = derive_plant_physics(&sparse);
-        let p_dense = derive_plant_physics(&dense);
+        let p_sparse = derive_producer_physics(&sparse);
+        let p_dense = derive_producer_physics(&dense);
 
         assert!(
             p_dense.base_metabolism < p_sparse.base_metabolism,
-            "Dense plant should photosynthesize more: {:.4} vs {:.4}",
-            p_dense.base_metabolism, p_sparse.base_metabolism,
+            "Dense producer should photosynthesize more: {:.4} vs {:.4}",
+            p_dense.base_metabolism,
+            p_sparse.base_metabolism,
         );
     }
 
     #[test]
-    fn test_plant_allometric_energy() {
-        let mut rng = rand::rng();
-        let mut small = crate::genome::PlantGenome::minimal_plant(&mut rng);
+    fn test_producer_allometric_energy() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut small = crate::genome::ProducerGenome::minimal_producer(&mut rng);
         small.stem_thickness = 0.1;
         small.height_factor = 0.2;
         small.max_energy_factor = 1.0;
@@ -417,13 +446,14 @@ mod tests {
         large.stem_thickness = 0.9;
         large.height_factor = 0.9;
 
-        let p_small = derive_plant_physics(&small);
-        let p_large = derive_plant_physics(&large);
+        let p_small = derive_producer_physics(&small);
+        let p_large = derive_producer_physics(&large);
 
         assert!(
             p_large.max_energy > p_small.max_energy,
-            "Larger plant should store more energy: {:.2} vs {:.2}",
-            p_large.max_energy, p_small.max_energy,
+            "Larger producer should store more energy: {:.2} vs {:.2}",
+            p_large.max_energy,
+            p_small.max_energy,
         );
     }
 }

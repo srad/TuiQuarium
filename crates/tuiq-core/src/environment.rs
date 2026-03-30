@@ -20,6 +20,8 @@ pub struct Environment {
     sim_time: f32,
     /// Time until next random event roll (seconds).
     event_cooldown: f32,
+    /// Whether stochastic events are enabled.
+    random_events_enabled: bool,
 }
 
 impl Default for Environment {
@@ -32,6 +34,7 @@ impl Default for Environment {
             active_event: None,
             sim_time: 0.0,
             event_cooldown: 60.0, // first event check after 60s
+            random_events_enabled: true,
         }
     }
 }
@@ -86,6 +89,17 @@ const HOURS_PER_SECOND: f32 = 24.0 / 300.0;
 const EVENT_INTERVAL: f32 = 60.0;
 
 impl Environment {
+    pub fn set_random_events_enabled(&mut self, enabled: bool) {
+        self.random_events_enabled = enabled;
+        if !enabled {
+            self.active_event = None;
+        }
+    }
+
+    pub fn random_events_enabled(&self) -> bool {
+        self.random_events_enabled
+    }
+
     /// Advance the environment by dt seconds.
     pub fn tick(&mut self, dt: f32, rng: &mut impl Rng) {
         self.sim_time += dt;
@@ -133,7 +147,7 @@ impl Environment {
         }
 
         // Roll for new event
-        if self.active_event.is_none() {
+        if self.random_events_enabled && self.active_event.is_none() {
             self.event_cooldown -= dt;
             if self.event_cooldown <= 0.0 {
                 let kind = EventKind::random(rng);
@@ -185,14 +199,102 @@ impl Environment {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Substrate zones
+// ---------------------------------------------------------------------------
+
+/// Substrate type at a bottom cell. Affects producer establishment and nutrient release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Substrate {
+    /// Default substrate — neutral modifiers.
+    Sandy,
+    /// Higher establishment for stress-tolerant producers, slower nutrient release.
+    Rocky,
+    /// Bonus for clonal spread and higher nutrient release from organic matter.
+    Planted,
+}
+
+/// A 1-D substrate map across the tank bottom (one value per column).
+#[derive(Debug, Clone)]
+pub struct SubstrateGrid {
+    cols: Vec<Substrate>,
+}
+
+impl SubstrateGrid {
+    /// Procedurally generate substrate zones using a seeded hash.
+    /// Creates coherent patches of 5–15 columns wide.
+    pub fn generate(tank_width: u16, seed: u64) -> Self {
+        let w = tank_width as usize;
+        let mut cols = vec![Substrate::Sandy; w];
+        if w == 0 {
+            return Self { cols };
+        }
+
+        // Simple deterministic zone generation using the seed.
+        // Walk across columns placing zones of varying width.
+        let mut x = 0usize;
+        // Mix the seed to avoid poor initial state for small seeds
+        let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        while x < w {
+            // xorshift64 for lightweight deterministic randomness
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+
+            let zone_width = 5 + (state % 11) as usize; // 5–15 columns
+            let substrate = match (state >> 8) % 3 {
+                0 => Substrate::Sandy,
+                1 => Substrate::Rocky,
+                _ => Substrate::Planted,
+            };
+
+            let end = (x + zone_width).min(w);
+            for col in &mut cols[x..end] {
+                *col = substrate;
+            }
+            x = end;
+        }
+
+        Self { cols }
+    }
+
+    /// Substrate type at a given x position.
+    pub fn at(&self, x: f32) -> Substrate {
+        let idx = (x as usize).min(self.cols.len().saturating_sub(1));
+        self.cols[idx]
+    }
+
+    /// Establishment modifier for a producer at position (x, y).
+    /// Rocky boosts stress-tolerant (high hardiness) producers.
+    /// Planted boosts clonal spread.
+    /// Sandy is neutral.
+    pub fn establishment_modifier(&self, x: f32, hardiness: f32) -> f32 {
+        match self.at(x) {
+            Substrate::Sandy => 1.0,
+            Substrate::Rocky => 0.8 + 0.4 * hardiness,   // 0.8–1.2 based on hardiness
+            Substrate::Planted => 1.15,                    // general bonus for established zones
+        }
+    }
+
+    /// Clonal spread bonus at this substrate.
+    pub fn clonal_bonus(&self, x: f32) -> f32 {
+        match self.at(x) {
+            Substrate::Planted => 1.3,
+            _ => 1.0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_time_advances() {
         let mut env = Environment::default();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let initial = env.time_of_day;
         env.tick(10.0, &mut rng);
         assert!(env.time_of_day > initial, "Time should advance");
@@ -201,29 +303,41 @@ mod tests {
     #[test]
     fn test_time_wraps_at_24() {
         let mut env = Environment::default();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         env.time_of_day = 23.9;
         env.tick(2.0, &mut rng); // should push past 24
-        assert!(env.time_of_day < 24.0, "Time should wrap: {}", env.time_of_day);
+        assert!(
+            env.time_of_day < 24.0,
+            "Time should wrap: {}",
+            env.time_of_day
+        );
     }
 
     #[test]
     fn test_light_bright_at_noon() {
         let mut env = Environment::default();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         env.time_of_day = 11.9;
         env.tick(0.01, &mut rng);
-        assert!(env.light_level > 0.8, "Noon should be bright: {}", env.light_level);
+        assert!(
+            env.light_level > 0.8,
+            "Noon should be bright: {}",
+            env.light_level
+        );
     }
 
     #[test]
     fn test_light_dark_at_midnight() {
         let mut env = Environment::default();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         env.time_of_day = 23.9;
         // Advance just a tiny bit so it processes around midnight
         env.tick(0.01, &mut rng);
-        assert!(env.light_level < 0.3, "Midnight should be dark: {}", env.light_level);
+        assert!(
+            env.light_level < 0.3,
+            "Midnight should be dark: {}",
+            env.light_level
+        );
     }
 
     #[test]
@@ -255,9 +369,13 @@ mod tests {
             kind: EventKind::ColdSnap,
             remaining: 10.0,
         });
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         env.tick(0.01, &mut rng);
-        assert!(env.temperature < 22.0, "Cold snap should lower temp: {}", env.temperature);
+        assert!(
+            env.temperature < 22.0,
+            "Cold snap should lower temp: {}",
+            env.temperature
+        );
     }
 
     #[test]
@@ -267,7 +385,7 @@ mod tests {
             kind: EventKind::Earthquake,
             remaining: 0.5,
         });
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         env.tick(1.0, &mut rng);
         assert!(env.active_event.is_none(), "Event should have expired");
     }
@@ -275,7 +393,7 @@ mod tests {
     #[test]
     fn test_current_changes_over_time() {
         let mut env = Environment::default();
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let c1 = env.current;
         env.tick(30.0, &mut rng);
         let c2 = env.current;
@@ -291,7 +409,11 @@ mod tests {
         env.light_level = 1.0;
         // y=10 in a 100-height tank = 10% depth (surface zone)
         let light = env.light_at_depth(10.0, 100.0);
-        assert!((light - 1.0).abs() < 0.01, "Surface zone should have full light: {}", light);
+        assert!(
+            (light - 1.0).abs() < 0.01,
+            "Surface zone should have full light: {}",
+            light
+        );
     }
 
     #[test]
@@ -300,7 +422,11 @@ mod tests {
         env.light_level = 1.0;
         // y=50 in a 100-height tank = 50% depth (mid-water zone)
         let light = env.light_at_depth(50.0, 100.0);
-        assert!((light - 0.7).abs() < 0.01, "Mid-water zone should have 0.7 light: {}", light);
+        assert!(
+            (light - 0.7).abs() < 0.01,
+            "Mid-water zone should have 0.7 light: {}",
+            light
+        );
     }
 
     #[test]
@@ -309,20 +435,107 @@ mod tests {
         env.light_level = 1.0;
         // y=80 in a 100-height tank = 80% depth (deep zone)
         let light = env.light_at_depth(80.0, 100.0);
-        assert!((light - 0.4).abs() < 0.01, "Deep zone should have 0.4 light: {}", light);
+        assert!(
+            (light - 0.4).abs() < 0.01,
+            "Deep zone should have 0.4 light: {}",
+            light
+        );
     }
 
     #[test]
     fn test_metabolism_at_depth_surface_normal() {
         let env = Environment::default();
         let meta = env.metabolism_at_depth(20.0, 100.0);
-        assert!((meta - 1.0).abs() < 0.01, "Surface metabolism should be 1.0: {}", meta);
+        assert!(
+            (meta - 1.0).abs() < 0.01,
+            "Surface metabolism should be 1.0: {}",
+            meta
+        );
     }
 
     #[test]
     fn test_metabolism_at_depth_deep_reduced() {
         let env = Environment::default();
         let meta = env.metabolism_at_depth(80.0, 100.0);
-        assert!((meta - 0.85).abs() < 0.01, "Deep metabolism should be 0.85: {}", meta);
+        assert!(
+            (meta - 0.85).abs() < 0.01,
+            "Deep metabolism should be 0.85: {}",
+            meta
+        );
+    }
+
+    #[test]
+    fn test_substrate_grid_generates_all_types() {
+        let grid = SubstrateGrid::generate(100, 42);
+        let mut has_sandy = false;
+        let mut has_rocky = false;
+        let mut has_planted = false;
+        for x in 0..100 {
+            match grid.at(x as f32) {
+                Substrate::Sandy => has_sandy = true,
+                Substrate::Rocky => has_rocky = true,
+                Substrate::Planted => has_planted = true,
+            }
+        }
+        assert!(has_sandy, "Should generate Sandy substrate");
+        assert!(has_rocky, "Should generate Rocky substrate");
+        assert!(has_planted, "Should generate Planted substrate");
+    }
+
+    #[test]
+    fn test_substrate_establishment_modifier_rocky_high_hardiness() {
+        let grid = SubstrateGrid::generate(100, 1);
+        // Rocky with max hardiness should give > 1.0 modifier
+        let rocky_x = (0..100)
+            .map(|x| x as f32)
+            .find(|&x| grid.at(x) == Substrate::Rocky)
+            .expect("Should have rocky substrate");
+        let mod_high = grid.establishment_modifier(rocky_x, 1.0);
+        assert!(
+            mod_high > 1.0,
+            "Rocky + high hardiness should boost: {}",
+            mod_high
+        );
+        let mod_low = grid.establishment_modifier(rocky_x, 0.0);
+        assert!(
+            mod_low < 1.0,
+            "Rocky + low hardiness should penalize: {}",
+            mod_low
+        );
+    }
+
+    #[test]
+    fn test_substrate_clonal_bonus_planted() {
+        let grid = SubstrateGrid::generate(100, 1);
+        let planted_x = (0..100)
+            .map(|x| x as f32)
+            .find(|&x| grid.at(x) == Substrate::Planted)
+            .expect("Should have planted substrate");
+        assert!(
+            grid.clonal_bonus(planted_x) > 1.0,
+            "Planted should give clonal bonus"
+        );
+        let sandy_x = (0..100)
+            .map(|x| x as f32)
+            .find(|&x| grid.at(x) == Substrate::Sandy)
+            .expect("Should have sandy substrate");
+        assert!(
+            (grid.clonal_bonus(sandy_x) - 1.0).abs() < 0.01,
+            "Sandy should give no bonus"
+        );
+    }
+
+    #[test]
+    fn test_substrate_deterministic_with_seed() {
+        let g1 = SubstrateGrid::generate(50, 123);
+        let g2 = SubstrateGrid::generate(50, 123);
+        for x in 0..50 {
+            assert_eq!(
+                g1.at(x as f32),
+                g2.at(x as f32),
+                "Same seed should produce same substrate at x={}",
+                x
+            );
+        }
     }
 }

@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/Tests-178_passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-239_passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Alpha-yellow" alt="Status">
 </p>
@@ -27,7 +27,7 @@
 <p align="center">
   No predefined species. No artificial food drops. Every creature emerges from a<br>
   continuous genome through mutation, crossover, and natural selection &mdash; rendered<br>
-  as procedural ASCII art &mdash; sustained entirely by evolving genome-driven plants.
+  as procedural ASCII art &mdash; sustained entirely by evolving genome-driven producer colonies.
 </p>
 
 ---
@@ -36,25 +36,31 @@
 
 ### Evolution &amp; Genetics
 
-- **Bottom-up emergent evolution** &mdash; no templates or predefined species; all creatures and plants emerge from continuous genomes through mutation and selection
+- **Bottom-up emergent evolution** &mdash; no templates or predefined species; all creatures and producer colonies emerge from continuous genomes through mutation and selection
 - **Creature genome** &mdash; 35+ float genes control body plan, appendages, eyes, coloring, behavior, and brain topology
-- **Plant genome** &mdash; 16 float genes control morphology (stem thickness, height, leaf area, branching, curvature, color) and physiology (photosynthesis rate, energy capacity, hardiness, seed dispersal, fecundity, lifespan, nutritional value), informed by ecological theory
-- **Complexity as a master gate** &mdash; a single 0.0&ndash;1.0 gene controls which morphological features are expressed in both creatures and plants; always mutates on reproduction (±0.15 drift) ensuring continuous exploration
-- **Asexual &amp; sexual reproduction** &mdash; simple cells divide asexually; complex creatures find compatible mates via genomic distance
-- **Plant reproduction** &mdash; mature and flowering plants produce mutated offspring; seed count, size, and dispersal range are genome-controlled; 30% probability gate per interval prevents synchronized seeding
+- **Producer genome** &mdash; 20 float genes control colony geometry, light capture, nutrient affinity, palatability, reserve allocation, and dispersal strategy; producer strategies emerge continuously rather than from hardcoded species types
+- **Complexity as a master gate** &mdash; a single 0.0&ndash;1.0 gene controls which morphological features are expressed in both creatures and producers; always mutates on reproduction (±0.15 drift) ensuring continuous exploration
+- **Bioenergetic creature reproduction** &mdash; consumers mature gradually, accumulate reproductive buffer from sustained surplus, and only then reproduce asexually or sexually
+- **Producer reproduction** &mdash; producer colonies allocate reserve surplus into broadcast propagules and local fragments; parent reserve is debited, establishment depends on light and crowding, and dispersal-vs-local-spread trade-offs are genome-controlled
 - **Smooth complexity transitions** &mdash; gradual shift from asexual to sexual reproduction prevents evolutionary traps
-- **Complexity rewards** &mdash; higher complexity grants +50% sensory range and ~25% metabolism efficiency for creatures; +15% photosynthesis efficiency for plants
-- **Evolvable mutation rate** &mdash; `mutation_rate_factor` gene (0.5&ndash;2.0) scales the base mutation rate in both creatures and plants; meta-evolution tunes evolvability itself
+- **Complexity rewards** &mdash; higher complexity grants +50% sensory range and ~25% metabolism efficiency for creatures; +15% photosynthesis efficiency for producers
+- **Evolvable mutation rate** &mdash; `mutation_rate_factor` gene (0.5&ndash;2.0) scales the base mutation rate in both creatures and producers; meta-evolution tunes evolvability itself
 - **Sexual selection** &mdash; `mate_preference_hue` gene drives Fisherian runaway selection by preferring mates whose color matches the preference
 - **Fitness sharing** &mdash; NEAT-style speciation protection; larger species have proportionally less reproduction chance, protecting novel innovations
-- **r/K selection trade-off** &mdash; plant `seed_count` (r-strategy: many cheap seeds) trades off with `seed_size` (K-strategy: few costly seeds); total reproductive investment = count &times; size (MacArthur &amp; Wilson, 1967)
-- **Grime&rsquo;s C-S-R Triangle** &mdash; plant strategies emerge from trade-offs between photosynthesis rate (Competitor), hardiness (Stress-tolerator), and seed count (Ruderal) (Grime, 1977)
+- **Runtime diversity coefficient** &mdash; arrow keys adjust a 0.25&ndash;2.5 slider that scales mutation rates and fitness-sharing strength in real time, letting you dial evolutionary pressure up or down without restarting
+- **Trait-based producer trade-offs** &mdash; dispersal, nutrient affinity, light capture, reserve allocation, and grazing value are all continuous genes so producer strategies emerge from trait combinations rather than from species templates
 
 ### Neural Network Brains
 
-- **NEAT-style evolving topology** &mdash; networks start minimal (16 inputs &rarr; 7 outputs, 112 connections) and grow via structural mutations that add hidden nodes and connections
+- **NEAT-style evolving topology** &mdash; networks start minimal (16 inputs &rarr; 7 outputs, 112 connections) and grow via structural mutations that add hidden nodes (8%), connections (12%), and recurrent self-loops (6%)
+- **Evolvable per-node activation functions** &mdash; each hidden/output node evolves its own activation (Tanh, ReLU, Sigmoid, Abs, Step, Identity) via swap mutations (2%), enabling diverse nonlinear representations
+- **Per-node bias** &mdash; each node has an evolvable bias term that shifts the activation threshold; biases mutate alongside weights and are crossed over during reproduction
 - **Innovation numbers** &mdash; historical gene markings enable meaningful crossover between creatures with different network topologies
-- **Hebbian lifetime learning** &mdash; evolvable `learning_rate` gene (0.0&ndash;0.1) allows weight plasticity during a creature's life; learned changes are NOT inherited (Baldwin Effect)
+- **Hebbian lifetime learning (Oja's rule)** &mdash; evolvable `learning_rate` gene (0.0&ndash;0.1) allows weight plasticity during a creature's life via self-normalizing Oja's rule; 10x faster than typical alife learning rates; learned changes are NOT inherited (Baldwin Effect)
+- **Neuromodulation** &mdash; hidden nodes can evolve into Modulator role (1% rate), whose sigmoid-gated output scales the Oja learning rate for all connections, enabling selective plasticity
+- **Attention mechanism** &mdash; hidden nodes can evolve into Attention role (0.5% rate), computing softmax-weighted blends of their inputs instead of simple weighted sums
+- **Module duplication** &mdash; a rare mutation (0.5% rate) copies a connected subgraph of hidden nodes with new innovation numbers, enabling functional modularity
+- **Recurrent self-connections** &mdash; hidden and output nodes can evolve self-loops that feed previous-tick activations back as input, giving creatures short-term memory without breaking feedforward topology
 - **Sensory inputs** &mdash; energy, hunger, nearby food/predators/allies, walls, light, speed, pheromone concentration &amp; gradient
 - **Behavioral outputs** &mdash; steering, speed, foraging, fleeing, schooling, pheromone emission
 - **Evolved, not designed** &mdash; both weights and topology are part of the genome and evolve through crossover and mutation
@@ -68,33 +74,35 @@
 
 ### Self-Sustaining Ecosystem
 
-- **Genome-driven plants** &mdash; plants evolve via a 16-gene `PlantGenome`; no hardcoded species types; morphology, physiology, and reproductive strategy all emerge from the genome
-- **LAI-based photosynthesis** &mdash; light capture follows the Beer&ndash;Lambert law: P = P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;c&middot;LAI</sup>); effective LAI derived from leaf area, branching, and height genes
-- **Allometric plant metabolism** &mdash; maintenance cost scales with mass<sup>0.75</sup> (Kleiber&rsquo;s law); larger plants need more energy to survive
-- **Partial grazing** &mdash; creatures drain 30% of a plant's energy per feeding with complexity-scaled efficiency (50&ndash;100%); plants survive and regenerate
-- **Logistic plant growth** &mdash; photosynthesis follows a logistic curve peaking at 50% population fill, preventing monocultures
-- **Plant lifecycle stages** &mdash; plants progress through Seedling &rarr; Young &rarr; Mature &rarr; Flowering &rarr; Wilting based on energy fraction and age; appearance visibly grows at each transition (height increases per stage within each complexity tier)
-- **Procedural plant ASCII art** &mdash; 4 complexity tiers (spore, sprout, medium bush, complex tree) selected by raw genome complexity; plant *size within each tier* scales with lifecycle stage so Seedlings are visibly smaller than Mature plants
-- **L-system-inspired shapes** &mdash; branching and curvature genes parameterize production rules for plant art generation (Lindenmayer, 1968)
-- **Plant reproduction** &mdash; mature and flowering plants seed mutated offspring nearby; seed count, size (r/K trade-off), and dispersal range are genome-controlled; 30% probability gate per seeding interval
-- **No artificial food rain** &mdash; the ecosystem sustains itself entirely through plant photosynthesis; manual food drops still available via `f` key
-- **Nutrient cycling** &mdash; dead creatures become detritus entities (50% of max energy), which decay slowly and can be grazed
-- **Depth zones** &mdash; surface (top 30%) has full light; mid-water has 70% light; deep zone (bottom 30%) has 40% light and 15% slower metabolism
+- **Genome-driven producer colonies** &mdash; producers evolve via a 20-float `ProducerGenome`; colony geometry, physiology, nutrient strategy, and dispersal mode all emerge from the genome
+- **LAI-based photosynthesis with nutrient co-limitation** &mdash; canopy capture follows Beer&ndash;Lambert-style light interception, then realized growth is limited by light, dissolved nitrogen, and dissolved phosphorus
+- **Allometric producer metabolism** &mdash; maintenance and recovery scale with biomass rather than with fixed stage tables, following metabolic-scaling ideas
+- **Producer storage and regeneration** &mdash; dormant biomass and regenerative banks buffer dark periods, post-grazing recovery, and local fragmentation
+- **Rasterized canopy shading** &mdash; a tank-wide `LightField` applies continuous depth attenuation plus canopy, phytoplankton, and epiphyte shading
+- **Demand-limited grazing** &mdash; grazers remove active producer biomass first, can scrub fouling load, and intake is limited by consumer demand rather than by a fixed prey damage fraction
+- **Producer lifecycle stages** &mdash; colonies progress through Cell &rarr; Patch &rarr; Mature &rarr; Broadcasting &rarr; Collapsing from reserve status, biomass fill, stress load, and age
+- **Procedural producer ASCII art** &mdash; 4 complexity tiers (speck, tuft, mat, plume) selected by raw genome complexity; producer size within each tier scales with lifecycle stage
+- **Reserve-cost producer reproduction** &mdash; mature producer colonies invest reserve surplus into broadcast propagules and fragments; establishment depends on local light, depth, and crowding
+- **No artificial food rain** &mdash; the ecosystem sustains itself entirely through producer photosynthesis; manual food drops still available via `f` key
+- **Nutrient cycling** &mdash; dead creatures become detritus entities, producer turnover returns N and P to dissolved/sediment pools, and nutrient load can drive phytoplankton shading; nitrogen fixation prevents irreversible N-depletion and a nutrient floor (5% of initial) ensures the ecosystem can always recover
+- **Substrate zones** &mdash; procedurally generated Sandy/Rocky/Planted substrate affects producer establishment; rocky zones favor high-hardiness producers, planted zones boost clonal spread
+- **Continuous depth/light attenuation** &mdash; underwater light declines smoothly with depth and water clarity rather than via three hard depth bands
 - **Night metabolism stress** &mdash; creatures burn 30% more energy at night, favoring complex creatures with metabolism efficiency bonuses
-- **Temperature effects** &mdash; Q10-based metabolic scaling affects both creatures and plants; cold snaps (&minus;10°C) create strong selection pressure
+- **Temperature effects** &mdash; Q10-based metabolic scaling affects both creatures and producers; cold snaps (&minus;10°C) create strong selection pressure
 - **Morphology-driven feeding** &mdash; `FeedingCapability` derived from mouth size, aggression, and hunting instinct; full spectrum from grazers to apex predators emerges naturally
 - **Predator-prey dynamics** &mdash; body-size ratio hunting, speed advantage checks, energy transfer on kill
 
 ### Simulation
 
-- **Procedural ASCII art** &mdash; 4 complexity tiers for both creatures (cells, simple, medium, complex) and plants (spore, sprout, bush, tree) generated from their respective genomes; no hardcoded art
+- **Procedural ASCII art** &mdash; 4 complexity tiers for both creatures (cells, simple, medium, complex) and producers (speck, tuft, mat, plume) generated from their respective genomes; no hardcoded art
 - **Boids flocking** &mdash; separation, alignment, cohesion with size-aware spacing and wall avoidance
-- **Allometric metabolism** &mdash; energy cost scales with mass^0.75 for creatures and plants (Kleiber's law)
+- **Allometric metabolism** &mdash; energy cost scales with mass^0.75 for creatures and producers (Kleiber's law)
 - **Day/night cycle** &mdash; sine-based lighting, palette shifts from bright day through dusk to dark night
 - **Random events** &mdash; algae blooms, feeding frenzies, cold snaps (&minus;10°C), earthquakes (every ~60s)
 - **Multi-threaded** &mdash; brain, boids, and hunting systems parallelized with rayon
 - **Soft population cap** &mdash; reproduction suppressed above 600 creatures to maintain responsiveness
-- **HUD overlay** &mdash; population, generation, complexity, species count, births/deaths, day, time, temperature, light, speed
+- **HUD overlay** &mdash; population, generation, complexity, species count, diversity coefficient, split creature/producer birth-death counters, day, time, temperature, light, speed, plus a toggleable ecology diagnostics panel and a help popup (`?`) explaining all abbreviations
+- **Single founder-web startup** &mdash; the visible run starts from low-biomass producer colonies and simple consumer founders, with no hidden warmup
 
 ## Quick Start
 
@@ -111,12 +119,16 @@ cd tuiquarium
 cargo run --release
 ```
 
-The simulation starts with **15 primordial cells** and **plants scaled to tank size** (roughly 1 per 150 cells, minimum 12). Creatures evolve from there.
+The default visible run starts directly from a simple aquatic founder web:
+
+- low-biomass producer colonies
+- simple motile consumer founders
+- no hidden warmup
 
 ### Run Tests
 
 ```bash
-cargo test --workspace    # 178 tests (173 core + 5 render)
+cargo test --workspace    # 239 passing tests (224 core + 13 render + 2 app)
 ```
 
 ## Controls
@@ -125,9 +137,14 @@ cargo test --workspace    # 178 tests (173 core + 5 render)
 |-----|--------|
 | `q` / `Esc` | Quit |
 | `Space` | Pause / Resume |
-| `+` / `=` | Speed up (0.5x increments, max 20x) |
-| `-` | Slow down (0.5x decrements, min 0.5x) |
+| `→` | Speed up (0.5x increments, max 20x) |
+| `←` | Slow down (0.5x decrements, min 0.5x) |
+| `↑` | Increase diversity coefficient (+0.1, max 2.5) |
+| `↓` | Decrease diversity coefficient (&minus;0.1, min 0.25) |
+| `r` | Reset speed and diversity to defaults (1.0) |
 | `f` | Drop food pellet (manual only; no auto-spawning) |
+| `d` | Toggle ecology diagnostics overlay |
+| `?` / `h` | Toggle help popup (explains all HUD abbreviations) |
 
 ## Architecture
 
@@ -135,30 +152,36 @@ tuiquarium strictly separates simulation from rendering through traits and depen
 
 ```
 tuiquarium/
-├── src/main.rs               # Entry point, game loop, input, DI wiring
+├── src/main.rs               # Entry point, TUI event loop
 ├── crates/
 │   ├── tuiq-core/            # Pure simulation logic (zero rendering deps)
 │   │   ├── animation.rs      # Frame sequencing & timing
 │   │   ├── behavior.rs       # Behavioral action types & speed multipliers
 │   │   ├── boids.rs          # Boids flocking (rayon-parallelized)
+│   │   ├── bootstrap.rs      # Founder genomes & ecosystem initialization
 │   │   ├── brain.rs          # NEAT neural network brains (rayon-parallelized)
+│   │   ├── calibration.rs    # Runtime calibration parameters
 │   │   ├── components.rs     # ECS components (Position, Velocity, Appearance, ...)
 │   │   ├── ecosystem.rs      # Energy, metabolism, grazing/hunting, death
-│   │   ├── environment.rs    # Day/night cycle, temperature, currents, events
+│   │   ├── environment.rs    # Day/night cycle, temperature, currents, events, substrate zones
 │   │   ├── genetics.rs       # Crossover, mutation, genomic distance
-│   │   ├── genome.rs         # CreatureGenome + PlantGenome: art, anim, behavior, brain, morphology, physiology genes
-│   │   ├── needs.rs          # Hunger, safety, reproduction needs
-│   │   ├── phenotype.rs      # Genome → physical stats (creatures + plants)
+│   │   ├── genome.rs         # CreatureGenome + ProducerGenome
+│   │   ├── lib.rs            # AquariumSim orchestrator, Simulation trait, tick()
+│   │   ├── needs.rs          # Hunger/safety/social drift
+│   │   ├── phenotype.rs      # Genome → physical stats (creatures + producers)
 │   │   ├── pheromone.rs      # Chemical signaling grid (deposit, diffusion, decay)
 │   │   ├── physics.rs        # Position integration, boundary handling
-│   │   ├── plant_lifecycle.rs # Plant genome → procedural ASCII art, lifecycle stages
+│   │   ├── producer_lifecycle.rs  # Producer genome → procedural ASCII art, lifecycle stages
+│   │   ├── producer_reproduction.rs # Producer broadcast & clonal propagation
 │   │   ├── spatial.rs        # Spatial hash grid with distance-filtered queries
-│   │   └── spawner.rs        # Asexual/sexual reproduction system
+│   │   ├── spawner.rs        # Asexual/sexual reproduction system
+│   │   ├── stats.rs          # SimStats, EcologyInstant, EcologyDiagnostics
+│   │   └── systems.rs        # Trait abstractions: BrainSystem, EcosystemSystem, HuntingSystem, ReproductionSystem, ProducerLifecycleSystem
 │   │
 │   └── tuiq-render/          # Ratatui rendering (depends on tuiq-core)
 │       ├── ascii.rs          # Procedural ASCII art generation from genome
 │       ├── effects.rs        # Bubble particle system
-│       ├── hud.rs            # Stats overlay (pop, gen, complexity, species, ...)
+│       ├── hud.rs            # Stats overlay (pop, gen, complexity, species, diversity, ...)
 │       ├── palette.rs        # Day/night color palette shifts
 │       └── tank.rs           # Tank border, water, substrate, creature rendering
 ```
@@ -166,31 +189,48 @@ tuiquarium/
 ### Design Principles
 
 - **Simulation knows nothing about rendering.** The `Simulation` trait exposes read-only access to the ECS world. Rendering code never mutates simulation state.
+- **Trait-based system architecture.** Each major ECS system (brain, ecosystem, hunting, reproduction, producer lifecycle) is defined as a trait with a concrete zero-cost implementation. The `tick()` orchestrator delegates through trait methods, enabling testability and future extensibility.
 - **ECS architecture** with [hecs](https://github.com/Ralith/hecs) &mdash; lightweight, no global state, manual system orchestration.
 - **Fixed timestep game loop** &mdash; 50ms ticks (20 ticks/sec simulation), ~60fps rendering, accumulator pattern.
 - **Spatial hash grid** reduces neighbor queries from O(n&sup2;) to ~O(n).
 - **Shared entity info map** built once per tick, passed to brain/boids/hunting to eliminate redundant world queries and HashMap constructions.
+- **Runtime diversity coefficient** &mdash; a single `[0.25, 2.5]` slider scales mutation rates and fitness-sharing strength, letting the user tune evolutionary pressure interactively without restarting.
 
 ## Neural Network Brains
 
-Every creature has an evolving neural network (NEAT-style) evaluated each tick. Networks start minimal and grow via structural mutations.
+Every creature has an evolving neural network (NEAT-style) evaluated each tick. Networks start minimal and grow via structural mutations. Each node has its own activation function, bias, and optional specialized role.
 
 ### Network Architecture
 
 ```
-Sensory Inputs (16)  →  [Evolving Hidden Topology]  →  Outputs (7, tanh)
+Sensory Inputs (16, Identity)  →  [Evolving Hidden Topology]  →  Outputs (7, per-node activation)
+                                   │ Per-node: ActivationFn + bias + role
+                                   │ Roles: Standard, Modulator, Attention
 ```
 
-Networks begin as direct input→output connections (112 weights) and grow via two structural mutations:
+Networks begin as direct input→output connections (112 weights) and grow via structural mutations:
 
-- **Add node** (3% per generation): splits an existing connection, inserting a hidden neuron
-- **Add connection** (5% per generation): adds a new feedforward connection between non-connected nodes
+- **Add node** (8% per generation): splits an existing connection, inserting a hidden neuron with a random activation (Tanh/ReLU/Sigmoid)
+- **Add connection** (12% per generation): adds a new feedforward connection between non-connected nodes
+- **Add self-connection** (6% per generation): adds a recurrent self-loop on a hidden or output node, enabling short-term memory
+- **Activation swap** (2% per generation): changes a random non-input node's activation function to a randomly chosen one from {Tanh, ReLU, Sigmoid, Abs, Step, Identity}
+- **Modulator flip** (1% per generation): converts a hidden node to Modulator role (forced Sigmoid activation), whose output gates the Oja learning rate globally
+- **Attention flip** (0.5% per generation): converts a hidden node to Attention role (forced Identity activation), computing softmax-weighted input blends
+- **Module duplication** (0.5% per generation): copies a 1-hop subgraph around a random hidden node, creating duplicate modules with new node IDs and innovation numbers
 
 Maximum topology: 60 nodes total, 300 connections. **Innovation numbers** track each structural mutation's history, enabling meaningful crossover between creatures with different topologies.
 
+**Per-node genes:** Each node has an `ActivationFn` (6 variants), a `bias` (−2.0 to +2.0), and a `NodeRole` (Standard/Modulator/Attention). These are stored in a `NodeGene` struct per node and evolve through mutation and crossover.
+
 **Output scaling:** all outputs are scaled by `complexity.max(0.3)`, ensuring even simple creatures can take meaningful actions while complex creatures have full control authority.
 
-**Hebbian learning:** an evolvable `learning_rate` gene (0.0–0.1) controls lifetime weight plasticity. When connected neurons co-activate, connections strengthen slightly. Learned weights are NOT inherited — only innate genome weights evolve (Baldwin Effect).
+**Hebbian learning (Oja's rule):** an evolvable `learning_rate` gene (0.0–0.1) controls lifetime weight plasticity. Weights update via Oja's rule: Δw = η · post · (pre − post · w), which is self-normalizing and prevents weight saturation. The learning rate is scaled by 0.01 (10x faster than typical alife rates) so creatures can adapt within their lifespan. A small weight decay (0.02% per tick) prevents drift. Biases also update via an analogous Oja-like rule. If Modulator nodes are present, their sigmoid-squashed output gates the learning rate for all connections — modulators near 0.0 suppress learning, near 1.0 allow it. Learned weights are NOT inherited — only innate genome weights evolve (Baldwin Effect).
+
+**Attention nodes:** Instead of computing a weighted sum, Attention nodes compute a softmax over connection weights to produce attention scores, then blend input activations proportionally. This enables selective focus on the most relevant inputs.
+
+**Module duplication:** When triggered, this mutation selects a random hidden node, finds all nodes within 1 connection hop, duplicates the subgraph with fresh node IDs and innovation numbers, and wires the copy's external connections analogously to the original. This enables functional modularity — successful subnetworks can be reused and diverge independently.
+
+**Recurrent self-connections:** hidden and output nodes can evolve self-loop connections where the previous tick's activation feeds back as additional input. This gives creatures short-term memory — a node's output depends not just on current sensory input but on its recent history. Self-loops are separated from the feedforward topological sort and use a dedicated activation buffer, so they don't create cycles in the forward pass.
 
 ### Sensory Inputs
 
@@ -237,34 +277,37 @@ All genes are continuous floats. There are no discrete categories or predefined 
 | **Art** | body elongation, height ratio, size, tail fork/length, top/side appendages, pattern density, eye size, primary/secondary hue, brightness | 0&ndash;2 (varies) |
 | **Animation** | swim speed, tail amplitude, idle sway, undulation | 0&ndash;2 |
 | **Behavior** | schooling, aggression, timidity, speed factor, metabolism factor, lifespan factor, reproduction rate, mouth size, hunting instinct, mutation rate factor, mate preference hue, learning rate, pheromone sensitivity | 0&ndash;2 (varies) |
-| **Brain** | NEAT genome: variable-length connection genes with innovation numbers, evolving topology | weights &minus;3 to +3 |
+| **Brain** | NEAT genome: variable-length connection genes with innovation numbers, per-node genes (activation function, bias, role), evolving topology | weights &minus;3 to +3, bias &minus;2 to +2 |
 | **Complexity** | master gate controlling feature expression | 0.0&ndash;1.0 |
 | **Generation** | inherited from parents + 1 | 0&ndash;&infin; |
 
-### Plant Genome
+### Producer Genome
 
-Plants have their own 16-gene genome that drives morphology, physiology, and reproductive strategy. Plant genomes evolve through mutation during reproduction (no crossover &mdash; asexual only). The genome design draws on established ecological theory:
+Producer colonies have their own 20-float genome plus generation tracking. It drives colony geometry, physiology, stress tolerance, nutrient use, herbivory resistance, and dispersal strategy. Producer genomes evolve through mutation during reproduction (no crossover &mdash; producer colonies stay asexual in this model).
 
 | Gene Group | Genes | Range | Ecological Basis |
 |-----------|-------|-------|-----------------|
-| **Morphology** | stem_thickness, height_factor, leaf_area (LAI proxy), branching, curvature, primary_hue | 0&ndash;1 | L-systems (Lindenmayer, 1968) |
-| **Physiology** | photosynthesis_rate, max_energy_factor, hardiness, seed_range, seed_count, seed_size, lifespan_factor, nutritional_value | 0.3&ndash;2.0 | Grime C-S-R (1977), r/K selection (MacArthur &amp; Wilson, 1967) |
-| **Evolution** | complexity, generation, mutation_rate_factor | 0&ndash;2 | Meta-evolution |
+| **Morphology** | stem_thickness, height_factor, leaf_area (capture-area proxy), branching, curvature, primary_hue | 0&ndash;1 | aquatic producer geometry; light access and colony-shape trade-offs |
+| **Physiology** | photosynthesis_rate, max_energy_factor, hardiness, nutritional_value, nutrient_affinity, epiphyte_resistance, reserve_allocation | 0&ndash;1.5 (varies) | metabolic scaling, nutrient co-limitation, herbivory and attached-growth trade-offs |
+| **Propagation** | seed_range, seed_count, seed_size, lifespan_factor, clonal_spread | 0&ndash;2 (varies) | broadcast-vs-local spread trade-offs, propagule-pressure ecology |
+| **Evolution** | complexity, mutation_rate_factor | 0&ndash;2 | Meta-evolution |
+| **Lineage** | generation | integer | Heritable lineage tracking |
 
 **Key models:**
 
-- **Beer&ndash;Lambert photosynthesis** &mdash; effective LAI = leaf_area &times; (1 + branching&times;0.5) &times; (0.5 + height&times;0.5); light capture P = P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;0.5&middot;LAI</sup>); high LAI gives diminishing returns
-- **Allometric scaling** &mdash; plant_mass = stem_thickness &times; height_factor &times; 5.0; maintenance cost &prop; mass<sup>0.75</sup> (Kleiber, 1947)
-- **r/K trade-off** &mdash; seed_count (many cheap seeds) vs seed_size (few costly seeds); total reproductive investment = count &times; size
-- **Visual complexity tiers** &mdash; plant appearance is complexity-gated by raw genome complexity: &lt;0.15 spore (single char), 0.15&ndash;0.35 sprout (2&ndash;5 lines), 0.35&ndash;0.6 medium bush, &ge;0.6 complex tree; within each tier, height scales with lifecycle stage (Seedling &times;0.5, Young &times;0.7, Mature &times;1.0)
+- **Beer&ndash;Lambert canopy capture** &mdash; effective LAI = leaf_area &times; (1 + branching&times;0.5) &times; (0.5 + height&times;0.5); light capture has diminishing returns with canopy density
+- **Monod-style resource limitation** &mdash; realized growth is limited by saturating responses to light, dissolved nitrogen, and dissolved phosphorus rather than by hard thresholds
+- **Allometric maintenance** &mdash; biomass maintenance scales sublinearly with size, while tissue turnover and senescence increase under chronic stress
+- **Reserve-cost propagation** &mdash; reserve surplus is partitioned into broadcast propagules and local fragments; `seed_count`, `seed_size`, and `clonal_spread` define strategy trade-offs
+- **Visual complexity tiers** &mdash; producer appearance is complexity-gated by raw genome complexity: &lt;0.12 speck, 0.12&ndash;0.35 tuft, 0.35&ndash;0.65 mat, &ge;0.65 plume; within each tier, size scales with lifecycle stage
 
-### Primordial Plants
+### Primordial Producer Colonies
 
-Initial plants are spawned with `minimal_plant()`:
+Initial producers are spawned with `minimal_producer()`:
 
-- **Complexity:** 0.15&ndash;0.4 (starts as sprout tier)
-- **Low values:** all morphology genes randomized 0.1&ndash;0.4
-- **Moderate physiology:** photosynthesis_rate ~1.0, balanced seed count/size
+- **Complexity:** 0.05&ndash;0.25 (starts as speck or tuft tier)
+- **Low-profile geometry:** all morphology genes randomized to colony-like low-to-moderate values
+- **Moderate physiology:** photosynthesis_rate ~1.0, balanced broadcast vs fragmentation strategy
 - **Staggered start:** initial energy randomized 50&ndash;100%, initial age randomized 0&ndash;20s to desynchronize lifecycle stages
 - **Generation 0:** first generation, no parent lineage
 
@@ -281,12 +324,12 @@ The simulation begins with `minimal_cell()` organisms:
 
 | Complexity | Mode | Details |
 |------------|------|---------|
-| &lt; 0.5 | Asexual only | Clone + mutate (25% mutation rate) |
-| 0.5 &ndash; 0.7 | Sexual preferred, asexual fallback | Tries to find compatible mate first |
-| 0.7 &ndash; 0.9 | Sexual preferred, rare asexual (30%) | Smooth transition zone |
-| &gt; 0.9 | Sexual only | Must find a compatible mate |
+| &lt; 0.32 | Asexual only | Clone + mutate (25% mutation rate) |
+| 0.32 &ndash; 0.62 | Sexual preferred, asexual fallback | Tries to find compatible mate first |
+| 0.62 &ndash; 0.82 | Sexual preferred, rare asexual (45%) | Smooth transition zone |
+| &ge; 0.82 | Sexual only | Must find a compatible mate |
 
-**Readiness:** reproduction need &gt; 0.9 and energy &gt; 40% + 5% &times; complexity.
+**Readiness:** consumers must be mature, hold reproductive buffer above an offspring threshold, clear a brood cooldown, and maintain strong body condition. `Needs.reproduction` is now a derived behavioral signal, not a timer.
 
 **Sexual crossover:** each gene randomly selected from one parent (uniform). Brain weights are a per-weight coin flip between parents. Offspring mutation rate: 15%.
 
@@ -294,7 +337,7 @@ The simulation begins with `minimal_cell()` organisms:
 
 **Mate compatibility:** genomic distance must be &lt; 8.0. Distance calculated as sum of absolute gene differences with brain distance weighted at 0.5&times; to prevent instant speciation from brain divergence alone.
 
-**Reproduction cost:** 30% of max energy per parent. Offspring start with 50% energy. Offspring spawn within ±3 cells of parent.
+**Reproduction cost:** explicit parental energy plus reproductive-buffer investment. Offspring start energy is reduced, and parents enter a cooldown instead of immediately breeding again.
 
 ### Feeding Capability
 
@@ -311,44 +354,38 @@ This allows the full spectrum from grazers to apex predators to emerge naturally
 ### Self-Sustaining Food Web
 
 ```
-Sunlight → Plant Photosynthesis → Grazing by Creatures → Death → Detritus
-                ↑                        ↓                         ↓
-        Plant Reproduction ←── Surviving Plants Regenerate    Decomposition & Grazing
+Sunlight → Producer Photosynthesis → Grazing by Creatures → Death → Detritus
+                 ↑                           ↓                         ↓
+        Producer Reproduction ←── Surviving Producers Recover   Decomposition & Grazing
 ```
 
-No artificial food is injected into the ecosystem. Energy enters only through plant photosynthesis, scales with depth zones (surface=100%, mid=70%, deep=40%), and follows logistic growth curves.
+No artificial food is injected into the ecosystem. Energy enters through producer photosynthesis, but realized producer growth is filtered by canopy shading, water-column attenuation, dissolved nutrients, fouling load, and herbivory.
 
 ### Energy Parameters
 
-| Parameter | Value | Effect |
+| Parameter | Model | Effect |
 |-----------|-------|--------|
-| Plant max energy | 15 &times; max_energy_factor &times; (1 + mass) | Genome-controlled; larger plants store more |
-| Plant photosynthesis | Beer&ndash;Lambert: P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;0.5&middot;LAI</sup>) &times; rate | LAI-based light capture with diminishing returns |
-| Plant maintenance | 0.08 &times; mass<sup>0.75</sup> &times; dt | Allometric cost (Kleiber's law); equilibrium ~81% energy |
-| Plant seed threshold | Mature or Flowering stage | Must be past Young stage; well-fed plants seed more reliably |
-| Plant seed probability | 30% per interval | Prevents synchronized mass seeding |
-| Plant seed interval | 5 seconds | Rate-limited reproduction |
-| Plant seed count | genome.seed_count (0.3&ndash;2.0, max 3 per cycle) | Genome-controlled fecundity |
-| Plant seed size | genome.seed_size (0.3&ndash;2.0) | Starting energy = max(30% &times; seed_size, 35%) &times; max_energy |
-| Plant lifespan | 12000&ndash;24000 ticks &times; lifespan_factor | Genome-controlled aging |
-| Plant population cap | ~tank_area/100 (min 15) | Scales with tank size |
-| Plant growth model | Logistic &times; LAI | Peaks at 50% population fill, min 0.1 factor |
-| Detritus energy | 50% of dead creature's max | Nutrient recycling |
-| Detritus decay rate | 0.5 &times; dt &times; base_metabolism | Slow decomposition |
-| Graze drain | 30% of plant's current energy | Partial &mdash; plant survives |
-| Graze efficiency | 50% + 50% &times; complexity | Complexity rewards better nutrient absorption |
+| Producer max energy | 15 &times; max_energy_factor &times; (1 + mass) | Genome-controlled reserve storage |
+| Producer photosynthesis | Beer&ndash;Lambert capture &times; Monod light/N/P limitation &times; canopy/fouling shading | Carbon gain limited by the scarcest resource |
+| Producer maintenance | Allometric biomass maintenance + tissue turnover + senescence turnover | Older or chronically stressed producers lose reserve and tissue gradually |
+| Producer reserve buffering | Dormant biomass + regenerative bank translocation | Attached producer stands can survive dark/stress periods and regrow after defoliation |
+| Producer reproduction | Reserve surplus &times; reserve_allocation &times; maturity | Parent reserve is debited; broadcast and fragment propagules differ in cost and dispersal |
+| Producer establishment | Local light &times; crowding filter &times; propagule type | Fragments establish reliably nearby; broadcast propagules disperse farther but fail more often |
+| Producer mortality | Reserve exhaustion or severe tissue loss | No deterministic age kill-switch for healthy producer colonies |
+| Nutrient pool | Dissolved/sediment N and P + phytoplankton load | Couples producer growth, detritus recycling, and turbidity |
+| Grazer intake | Consumer energy deficit, body mass, graze skill, and handling-limited intake over time | Satiated grazers do less damage; hungry grazers strip leaf tissue first |
+| Detritus recycling | Dead creatures and plant turnover feed dissolved/sediment nutrients | Closes the nutrient loop |
 | Creature max energy | 100 &times; body_mass | Larger creatures store more |
-| Creature metabolism | mass^0.75 &times; 0.5 &times; 0.25 &times; (1 &minus; 0.25&times;complexity) | Allometric with complexity discount |
-| Predation transfer | 80% of prey's max energy | High reward for successful hunts |
-| Reproduction cost | 30% of max energy per parent | Investment in offspring |
-| Offspring energy | 50% of max | Born with moderate reserves |
+| Creature metabolism | mass^0.75 with complexity discount | Allometric cost for mobile consumers |
+| Predation transfer | Fraction of prey reserve on successful capture | Hunting remains high-reward relative to grazing |
+| Reproduction cost | Fraction of parental reserve | Investment in offspring remains explicit |
 
 ### Hunting Rules
 
 | Prey Type | Requirements |
 |-----------|-------------|
-| **Plants** | graze_skill &gt; 0.2, within 5 cells |
-| **Mobile prey** | hunt_skill &gt; 0.3, predator speed &ge; 0.8&times; prey speed, prey mass &lt; max_prey_mass, within 3 cells |
+| **Plants** | graze_skill &gt; 0.2, non-trivial hunger/energy deficit, within 4 cells |
+| **Mobile prey** | hunt_skill &gt; 0.3, hunger/energy deficit, predator speed &ge; 0.8&times; prey speed, prey mass &lt; max_prey_mass, within 3 cells |
 
 ## Evolutionary Tradeoffs
 
@@ -370,12 +407,12 @@ Creatures have an internal needs system that drives behavior through the neural 
 |------|------|--------|
 | Hunger | Rises at 0.02/s | Fed by eating, drives foraging |
 | Safety | Decays 50%/s when safe | Spikes near predators, drives fleeing |
-| Reproduction | Rises at 0.02/s | Triggers breeding when &gt; 0.9 |
+| Reproduction | Derived from maturity + reproductive buffer | Triggers mate-seeking only when life-history gates are satisfied |
 | Rest | Rises at 0.01/s | Drives resting behavior |
 | Social | Drifts to baseline | Drives schooling |
 | Curiosity | Rises at 0.01/s | Drives exploration |
 
-`NeedWeights` are derived from each creature's genome, making need accumulation rates heritable and evolvable.
+`NeedWeights` are derived from each creature's genome, making baseline hunger/rest/social drift evolvable. Reproductive timing is handled separately by `ConsumerState`.
 
 ## Simulation Systems (per tick)
 
@@ -384,16 +421,17 @@ Creatures have an internal needs system that drives behavior through the neural 
 | 1 | **Environment** | Advance time, light, temperature, currents, random events |
 | 2 | **Spatial grid** | Rebuild neighbor lookup structure |
 | 3 | **Entity info map** | Build shared HashMap for all systems |
-| 4 | **Needs** | Hunger rises, safety decays, reproduction builds |
+| 4 | **Needs** | Hunger rises, safety decays, and behavioral needs drift |
 | 5 | **Brain + Pheromone deposit** | Neural network sensory processing, decisions, chemical signaling (parallel) |
 | 6 | **Pheromone grid** | Decay and diffuse pheromone concentrations |
 | 7 | **Boids** | Separation, alignment, cohesion steering forces (parallel) |
 | 8 | **Physics** | Integrate velocities, enforce boundaries, update facing |
-| 9 | **Metabolism** | Drain energy (creatures, with night stress), gain energy (plants), increment age |
-| 10 | **Hunting** | Predator-prey interactions, grazing, energy transfer (parallel) |
-| 11 | **Reproduction** | Mate pairing or asexual division, fitness sharing, offspring spawning |
-| 12 | **Death** | Remove starved or aged entities, spawn detritus for nutrient cycling |
-| 13 | **Plant seeding** | Mature plants reproduce new plants nearby |
+| 9 | **Nutrients + LightField** | Update dissolved/sediment nutrients, phytoplankton load, and rasterized canopy shading |
+| 10 | **Metabolism + Producer ecology** | Drain creature energy, recycle detritus, run producer photosynthesis/maintenance/turnover, and buffer regenerative reserves |
+| 10b | **Consumer life history** | Update maturation, reproductive buffer, and brood cooldown from energetic state |
+| 11 | **Hunting** | Predator-prey interactions, demand-limited grazing, energy transfer (parallel) |
+| 12 | **Reproduction** | Mate pairing or asexual division for creatures, then reserve-cost broadcast/fragment propagation for producers |
+| 13 | **Death** | Remove starved entities, recycle producer biomass, spawn detritus for nutrient cycling |
 | 14 | **Animation** | Advance frame timers |
 
 ## Performance
@@ -425,19 +463,20 @@ Optimized for 600+ creatures at 20 ticks/sec:
 
 | Algorithm | Module | Description |
 |-----------|--------|-------------|
-| **NEAT neuroevolution** | `brain.rs` | Evolving topology networks with innovation numbers, add-node/add-connection mutations, topological sort forward pass |
-| **Hebbian learning** | `brain.rs` | Lifetime weight plasticity via co-activation strengthening (Baldwin Effect) |
+| **NEAT neuroevolution** | `brain.rs` | Evolving topology networks with innovation numbers, per-node activation functions (6 variants), bias, structural/role mutations, topological sort forward pass |
+| **Oja's rule** | `brain.rs` | Self-normalizing lifetime weight plasticity: Δw = η·post·(pre − post·w) + weight decay, with neuromodulation gating (Baldwin Effect) |
 | **Boids flocking** | `boids.rs` | Craig Reynolds (1986) &mdash; separation, alignment, cohesion + wall avoidance |
-| **Genetic evolution** | `genetics.rs` | Uniform crossover, Gaussian mutation, NEAT-aligned brain crossover, evolvable mutation rate; plant mutation with independent perturbation per gene |
+| **Genetic evolution** | `genetics.rs` | Uniform crossover, Gaussian mutation, NEAT-aligned brain crossover, evolvable mutation rate; producer mutation with independent perturbation per gene |
 | **Fitness sharing** | `spawner.rs` | NEAT-style speciation: greedy clustering by genomic distance, proportional reproduction penalty |
-| **Allometric scaling** | `phenotype.rs`, `ecosystem.rs` | Metabolism ~ mass^0.75 for creatures and plants (Kleiber, 1947) |
-| **Beer&ndash;Lambert photosynthesis** | `phenotype.rs`, `ecosystem.rs` | LAI-based light capture: P = P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;0.5&middot;LAI</sup>) with logistic growth modifier |
-| **L-system-inspired art** | `plant_lifecycle.rs` | Genome-driven procedural plant ASCII art with branching/curvature parameters (Lindenmayer, 1968) |
-| **r/K selection** | `genome.rs`, `lib.rs` | Seed count vs seed size trade-off in plant reproduction (MacArthur &amp; Wilson, 1967) |
-| **Plant lifecycle** | `plant_lifecycle.rs` | Energy/age-based stage transitions (Seedling &rarr; Young &rarr; Mature &rarr; Flowering &rarr; Wilting) |
-| **Partial grazing** | `ecosystem.rs` | Plants lose energy when grazed but regenerate via photosynthesis |
+| **Allometric scaling** | `phenotype.rs`, `ecosystem.rs` | Metabolism ~ mass^0.75 for creatures and producers (Kleiber, 1947) |
+| **Beer&ndash;Lambert canopy capture** | `phenotype.rs`, `ecosystem.rs` | LAI-based light interception with diminishing returns |
+| **Monod resource limitation** | `ecosystem.rs` | Saturating light, nitrogen, and phosphorus limitation for producer growth |
+| **Procedural producer art** | `producer_lifecycle.rs` | Genome-driven colony ASCII art with stage-scaled speck/tuft/mat/plume forms |
+| **Dispersal trade-offs** | `genome.rs`, `lib.rs` | Broadcast propagule count vs size and local fragmentation trade-offs |
+| **Producer lifecycle** | `producer_lifecycle.rs` | Biomass/reserve/stress-based stage transitions with cell/patch/mature/broadcasting/collapsing states |
+| **Demand-limited grazing** | `ecosystem.rs` | Grazers remove active producer biomass and reserve according to consumer demand rather than fixed prey damage |
 | **Nutrient cycling** | `ecosystem.rs` | Dead creatures &rarr; detritus entities &rarr; grazable decomposition |
-| **Depth zones** | `environment.rs` | 3-zone model: surface/mid/deep affecting light and metabolism |
+| **Rasterized light field** | `ecosystem.rs` | Continuous depth attenuation plus canopy, phytoplankton, and epiphyte shading |
 | **Emergent predation** | `ecosystem.rs` | Morphology-derived feeding capability, body size ratio + speed checks |
 | **Pheromone signaling** | `pheromone.rs` | Grid-based chemical communication with decay, diffusion, gradient sensing |
 | **Spatial hashing** | `spatial.rs` | Grid-based bucketing with distance-filtered queries |
@@ -446,22 +485,31 @@ Optimized for 600+ creatures at 20 ticks/sec:
 
 - [x] Neural network brains &mdash; evolved feedforward networks drive creature behavior
 - [x] NEAT topology evolution &mdash; evolve network structure (add nodes/connections), not just weights
-- [x] Hebbian learning &mdash; lifetime weight plasticity with evolvable learning rate (Baldwin Effect)
+- [x] Hebbian learning &mdash; Oja's rule lifetime weight plasticity with evolvable learning rate (Baldwin Effect)
 - [x] Emergent evolution &mdash; continuous genome, no predefined species
 - [x] Multi-threaded simulation &mdash; rayon parallelism for brain/boids/hunting
 - [x] Performance optimization &mdash; shared entity maps, spatial capping
-- [x] Self-sustaining ecosystem &mdash; plant photosynthesis replaces artificial food rain
-- [x] Partial grazing &mdash; plants survive being eaten and regenerate
-- [x] Plant reproduction &mdash; mature plants seed offspring, population-capped
-- [x] Genome-driven plants &mdash; 16-gene `PlantGenome` with allometric scaling, LAI photosynthesis, r/K selection, and procedural ASCII art
+- [x] Self-sustaining ecosystem &mdash; producer photosynthesis replaces artificial food rain
+- [x] Partial grazing &mdash; producer colonies survive being eaten and regenerate
+- [x] Producer reproduction &mdash; reserve-cost broadcast and fragment propagation with establishment filters
+- [x] Genome-driven producers &mdash; 20-float `ProducerGenome` with allometric scaling, LAI-style light capture, nutrient limitation, and procedural ASCII art
 - [x] Complexity-driven evolution &mdash; sensory and metabolism bonuses reward complexity
 - [x] Nutrient cycling &mdash; dead creatures become grazable detritus entities
-- [x] Depth zones &mdash; environmental heterogeneity with light and metabolism gradients
+- [x] Rasterized light field &mdash; continuous depth and canopy shading instead of hard depth zones
 - [x] Fitness sharing &mdash; NEAT-style speciation protects novel innovations
 - [x] Evolvable mutation rate &mdash; meta-evolution tunes mutation rates per lineage
 - [x] Sexual selection &mdash; Fisherian runaway via mate color preference
-- [x] Logistic plant growth &mdash; density-dependent carrying capacity
+- [x] Nutrient-limited producer ecology &mdash; Monod-style resource limitation, gradual senescence, and demand-limited grazing
 - [x] Pheromone signaling &mdash; grid-based chemical communication with decay, diffusion, and gradient sensing
+- [x] Runtime diversity coefficient &mdash; ↑/↓ keys scale mutation rates and fitness sharing for interactive evolutionary tuning
+- [x] Substrate zones &mdash; procedural Sandy/Rocky/Planted substrate affecting producer establishment and clonal spread
+- [x] Nutrient resilience &mdash; nitrogen fixation, increased benthic P release, and nutrient floor prevent irreversible crashes
+- [x] Trait-based system architecture &mdash; modular trait abstractions for brain, ecosystem, hunting, reproduction, and producer lifecycle
+- [x] Evolvable activation functions &mdash; per-node activation (Tanh/ReLU/Sigmoid/Abs/Step/Identity) evolved through swap mutations
+- [x] Per-node bias &mdash; evolvable bias terms with Oja-like lifetime updates
+- [x] Neuromodulation &mdash; Modulator nodes gate Oja learning rate for selective plasticity
+- [x] Attention mechanism &mdash; Attention nodes compute softmax-weighted input blends
+- [x] Module duplication &mdash; mutation copies connected subgraphs for functional modularity
 - [ ] Save/load simulation state (serde serialization)
 - [ ] Terminal resize handling
 - [ ] Configuration file for simulation parameters
@@ -493,21 +541,31 @@ Please make sure `cargo test --workspace` passes before submitting.
 - Craig Reynolds, [Flocks, Herds, and Schools: A Distributed Behavioral Model](https://www.red3d.com/cwr/papers/1987/SIGGRAPH87.pdf) (SIGGRAPH 1987)
 - [Steering Behaviors for Autonomous Characters](https://slsdo.github.io/steering-behaviors/)
 
-### Plant Ecology &amp; Evolutionary Theory
+### Aquatic Producer Ecology
 
-- Aristid Lindenmayer, [Mathematical Models for Cellular Interaction in Development](https://doi.org/10.1016/0022-5193(68)90079-9) (Journal of Theoretical Biology, 1968) &mdash; L-systems: formal grammar for modeling plant branching and growth; used for plant ASCII art generation
-- J. Philip Grime, [Evidence for the Existence of Three Primary Strategies in Plants](https://doi.org/10.1086/283244) (The American Naturalist, 1977) &mdash; C-S-R Triangle: Competitor/Stress-tolerator/Ruderal strategies; maps to photosynthesis_rate, hardiness, and seed_count genes
-- Robert H. MacArthur & Edward O. Wilson, *The Theory of Island Biogeography* (Princeton University Press, 1967) &mdash; r/K selection theory: trade-off between many cheap offspring (r) and few costly offspring (K); maps to seed_count vs seed_size genes
+- Litchman & Klausmeier, [Trait-Based Community Ecology of Phytoplankton](https://doi.org/10.1146/annurev.ecolsys.39.110707.173549) (Annual Review of Ecology, Evolution, and Systematics, 2008) &mdash; supports modeling aquatic producers as continuous trait combinations along light capture, nutrient use, and dispersal trade-offs
+- Azam et al., [The Ecological Role of Water-Column Microbes in the Sea](https://doi.org/10.3354/meps010257) (Marine Ecology Progress Series, 1983) &mdash; supports the founder-web framing of phototrophic producers, heterotrophs, detritus, and recycling in a microbial aquatic ecosystem
+- Liu et al., [Coupling Between Carbon and Nitrogen Metabolic Processes Mediated by Coastal Microbes in Synechococcus-Derived Organic Matter Addition Incubations](https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2020.593561/full) (Frontiers in Microbiology, 2020) &mdash; supports routing part of active producer carbon through a labile microbial-loop pathway instead of forcing all heterotroph intake through direct tissue grazing
+- Weedall & Hall, [Sexual reproduction and genetic exchange in parasitic protists](https://pubmed.ncbi.nlm.nih.gov/25529755/) (Parasitology, 2015) &mdash; supports allowing genetic exchange in morphologically simple aquatic consumers instead of restricting crossover to animal-like complexity
+- Robert H. MacArthur & Edward O. Wilson, *The Theory of Island Biogeography* (Princeton University Press, 1967) &mdash; r/K selection theory: trade-off between many cheap offspring (r) and few costly offspring (K); maps to propagule count vs propagule size
+- He et al., [Trait-mediated light and depth responses in submerged macrophytes](https://pubmed.ncbi.nlm.nih.gov/30842784/) (2019) &mdash; supports morphology-driven biomass targets and canopy access to brighter water
+- Yu et al., [Nitrogen enrichment and indirect shading effects on submerged plants](https://pmc.ncbi.nlm.nih.gov/articles/PMC6300520/) (2018) &mdash; supports phytoplankton/periphyton shading and canopy-form vs low-form trade-offs
+- Mebane et al., [Nutrient co-limitation in aquatic primary producers](https://pubmed.ncbi.nlm.nih.gov/34143815/) (2021) &mdash; supports explicit dissolved N and P limitation instead of single-resource producer growth
+- Li et al., [Vegetative Propagule Pressure and Water Depth Affect Biomass and Evenness of Submerged Macrophyte Communities](https://pmc.ncbi.nlm.nih.gov/articles/PMC4641593/) (2015) &mdash; supports local establishment limits and patch-occupancy effects on propagules
+- Thompson & Eckert, [Trade-offs between sexual and clonal reproduction in aquatic plants](https://pubmed.ncbi.nlm.nih.gov/15149401/) (2004) &mdash; supports reserve-cost dispersal vs local spread allocation
+- Ren et al., [Water depth affects submersed macrophyte more than herbivorous snail in mesotrophic lakes](https://pmc.ncbi.nlm.nih.gov/articles/PMC11140150/) (2024) &mdash; supports grazing that can reduce attached growth while depth/light remains the dominant producer driver
 
 ### Allometric Scaling &amp; Metabolism
 
-- Max Kleiber, [Body Size and Metabolic Rate](https://doi.org/10.1152/physrev.1947.27.4.511) (Physiological Reviews, 1947) &mdash; Kleiber's law: metabolic rate scales with mass^0.75; used for both creature and plant maintenance costs
-- [Kleiber's law](https://en.wikipedia.org/wiki/Kleiber%27s_law) &mdash; Wikipedia overview of allometric metabolic scaling
+- Max Kleiber, [Body Size and Metabolic Rate](https://doi.org/10.1152/physrev.1947.27.4.511) (Physiological Reviews, 1947) &mdash; Kleiber's law: metabolic rate scales with mass^0.75; used for both creature and producer maintenance costs
+- Gillooly et al., [Effects of Size and Temperature on Developmental Time](https://doi.org/10.1038/417070a) (Nature, 2002) &mdash; supports scaling consumer maturation with body size on a weaker timescale than total lifespan in the aquatic founder web
+- Brown et al., [Toward a Metabolic Theory of Ecology](https://doi.org/10.1890/03-9000) (Ecology, 2004) &mdash; supports allometric maintenance and reserve-allocation framing across organisms
 
 ### Photosynthesis &amp; Light Capture
 
-- [Beer&ndash;Lambert law](https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law) &mdash; exponential light attenuation through a medium; used for LAI-based photosynthesis: P = P<sub>max</sub>&middot;(1 &minus; e<sup>&minus;c&middash;LAI</sup>)
-- [Leaf Area Index (LAI)](https://en.wikipedia.org/wiki/Leaf_area_index) &mdash; ratio of total leaf area to ground area; proxy for plant light interception capacity
+- Beer&ndash;Lambert law &mdash; exponential light attenuation through a medium; used for LAI-based canopy capture and water-column attenuation
+- Jacques Monod, [The Growth of Bacterial Cultures](https://doi.org/10.1146/annurev.mi.03.100149.002103) (Annual Review of Microbiology, 1949) &mdash; provides the saturating half-saturation model used for light/N/P limitation
+- C. S. Holling, [The Components of Predation as Revealed by a Study of Small-Mammal Predation of the European Pine Sawfly](https://doi.org/10.4039/Ent91293-5) (The Canadian Entomologist, 1959) &mdash; informs the demand-limited, saturating consumer-resource framing used for grazing
 
 ### Population Dynamics
 

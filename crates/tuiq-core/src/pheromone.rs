@@ -2,15 +2,15 @@
 /// Creatures deposit pheromones; concentrations decay and diffuse over time.
 
 pub struct PheromoneGrid {
-    width: usize,   // number of cells in X
-    height: usize,  // number of cells in Y
+    width: usize,  // number of cells in X
+    height: usize, // number of cells in Y
     cell_size: f32,
     cells: Vec<f32>,
 }
 
 const CELL_SIZE: f32 = 4.0;
-const DECAY_RATE: f32 = 0.95;       // per tick (at 20Hz → ~3.5s half-life)
-const DIFFUSION_RATE: f32 = 0.05;   // fraction spread to each neighbor per tick
+const DECAY_RATE: f32 = 0.95; // per tick (at 20Hz → ~3.5s half-life)
+const DIFFUSION_RATE: f32 = 0.05; // fraction spread to each neighbor per tick
 
 impl PheromoneGrid {
     pub fn new(tank_width: f32, tank_height: f32) -> Self {
@@ -38,7 +38,9 @@ impl PheromoneGrid {
 
     /// Deposit pheromone at a world position.
     pub fn deposit(&mut self, x: f32, y: f32, amount: f32) {
-        if amount <= 0.0 { return; }
+        if amount <= 0.0 {
+            return;
+        }
         let (cx, cy) = self.to_cell(x, y);
         let idx = self.cell_index(cx, cy);
         self.cells[idx] = (self.cells[idx] + amount).min(1.0);
@@ -57,10 +59,26 @@ impl PheromoneGrid {
         let (cx, cy) = self.to_cell(x, y);
 
         // Sample neighbors (clamp at boundaries)
-        let left = if cx > 0 { self.cells[self.cell_index(cx - 1, cy)] } else { 0.0 };
-        let right = if cx + 1 < self.width { self.cells[self.cell_index(cx + 1, cy)] } else { 0.0 };
-        let up = if cy > 0 { self.cells[self.cell_index(cx, cy - 1)] } else { 0.0 };
-        let down = if cy + 1 < self.height { self.cells[self.cell_index(cx, cy + 1)] } else { 0.0 };
+        let left = if cx > 0 {
+            self.cells[self.cell_index(cx - 1, cy)]
+        } else {
+            0.0
+        };
+        let right = if cx + 1 < self.width {
+            self.cells[self.cell_index(cx + 1, cy)]
+        } else {
+            0.0
+        };
+        let up = if cy > 0 {
+            self.cells[self.cell_index(cx, cy - 1)]
+        } else {
+            0.0
+        };
+        let down = if cy + 1 < self.height {
+            self.cells[self.cell_index(cx, cy + 1)]
+        } else {
+            0.0
+        };
 
         let gx = right - left;
         let gy = down - up;
@@ -80,25 +98,45 @@ impl PheromoneGrid {
             for cx in 0..w {
                 let idx = cy * w + cx;
                 let val = self.cells[idx];
-                if val < 0.001 { continue; } // skip near-zero cells
+                if val < 0.001 {
+                    continue;
+                } // skip near-zero cells
 
                 let spread = val * DIFFUSION_RATE;
                 let mut neighbor_count = 0u32;
 
-                if cx > 0 { neighbor_count += 1; }
-                if cx + 1 < w { neighbor_count += 1; }
-                if cy > 0 { neighbor_count += 1; }
-                if cy + 1 < h { neighbor_count += 1; }
+                if cx > 0 {
+                    neighbor_count += 1;
+                }
+                if cx + 1 < w {
+                    neighbor_count += 1;
+                }
+                if cy > 0 {
+                    neighbor_count += 1;
+                }
+                if cy + 1 < h {
+                    neighbor_count += 1;
+                }
 
-                if neighbor_count == 0 { continue; }
+                if neighbor_count == 0 {
+                    continue;
+                }
 
                 let per_neighbor = spread / neighbor_count as f32;
                 deltas[idx] -= spread;
 
-                if cx > 0     { deltas[cy * w + (cx - 1)] += per_neighbor; }
-                if cx + 1 < w { deltas[cy * w + (cx + 1)] += per_neighbor; }
-                if cy > 0     { deltas[(cy - 1) * w + cx] += per_neighbor; }
-                if cy + 1 < h { deltas[(cy + 1) * w + cx] += per_neighbor; }
+                if cx > 0 {
+                    deltas[cy * w + (cx - 1)] += per_neighbor;
+                }
+                if cx + 1 < w {
+                    deltas[cy * w + (cx + 1)] += per_neighbor;
+                }
+                if cy > 0 {
+                    deltas[(cy - 1) * w + cx] += per_neighbor;
+                }
+                if cy + 1 < h {
+                    deltas[(cy + 1) * w + cx] += per_neighbor;
+                }
             }
         }
 
@@ -144,7 +182,12 @@ mod tests {
         let before = grid.sample(10.0, 10.0);
         grid.tick();
         let after = grid.sample(10.0, 10.0);
-        assert!(after < before, "Concentration should decay: {} -> {}", before, after);
+        assert!(
+            after < before,
+            "Concentration should decay: {} -> {}",
+            before,
+            after
+        );
     }
 
     #[test]
@@ -181,7 +224,10 @@ mod tests {
         // Gradient at center should point right (positive gx)
         let center_x = cx as f32 * CELL_SIZE + 1.0;
         let (gx, _gy) = grid.gradient(center_x, center_y);
-        assert!(gx > 0.0, "Gradient should point toward higher concentration (right)");
+        assert!(
+            gx > 0.0,
+            "Gradient should point toward higher concentration (right)"
+        );
     }
 
     #[test]

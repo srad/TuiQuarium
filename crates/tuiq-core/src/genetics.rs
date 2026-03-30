@@ -7,6 +7,14 @@ use rand::RngExt;
 use crate::brain::{self, InnovationTracker};
 use crate::genome::*;
 
+/// Genomic distance threshold used for creature species clustering.
+///
+/// Simulation assumption: the founder web needs a threshold tight enough that
+/// ecologically distinct low-complexity consumer strategies are not merged into
+/// one species cloud, while still requiring multiple trait shifts before a new
+/// lineage is counted.
+pub const CREATURE_SPECIES_THRESHOLD: f32 = 1.5;
+
 /// Uniform crossover: each gene randomly from parent A or B.
 pub fn crossover(a: &CreatureGenome, b: &CreatureGenome, rng: &mut impl Rng) -> CreatureGenome {
     CreatureGenome {
@@ -20,7 +28,11 @@ pub fn crossover(a: &CreatureGenome, b: &CreatureGenome, rng: &mut impl Rng) -> 
 }
 
 fn pick_f32(a: f32, b: f32, rng: &mut impl Rng) -> f32 {
-    if rng.random_bool(0.5) { a } else { b }
+    if rng.random_bool(0.5) {
+        a
+    } else {
+        b
+    }
 }
 
 fn crossover_art(a: &ArtGenome, b: &ArtGenome, rng: &mut impl Rng) -> ArtGenome {
@@ -49,7 +61,11 @@ fn crossover_anim(a: &AnimGenome, b: &AnimGenome, rng: &mut impl Rng) -> AnimGen
     }
 }
 
-fn crossover_behavior(a: &BehaviorGenome, b: &BehaviorGenome, rng: &mut impl Rng) -> BehaviorGenome {
+fn crossover_behavior(
+    a: &BehaviorGenome,
+    b: &BehaviorGenome,
+    rng: &mut impl Rng,
+) -> BehaviorGenome {
     BehaviorGenome {
         schooling_affinity: pick_f32(a.schooling_affinity, b.schooling_affinity, rng),
         aggression: pick_f32(a.aggression, b.aggression, rng),
@@ -68,11 +84,17 @@ fn crossover_behavior(a: &BehaviorGenome, b: &BehaviorGenome, rng: &mut impl Rng
 }
 
 /// Mutate a genome in-place. Each float gene has `rate` probability of being perturbed.
-pub fn mutate(genome: &mut CreatureGenome, rate: f32, rng: &mut impl Rng, tracker: &mut InnovationTracker) {
+pub fn mutate(
+    genome: &mut CreatureGenome,
+    rate: f32,
+    diversity: f32,
+    rng: &mut impl Rng,
+    tracker: &mut InnovationTracker,
+) {
     mutate_art(&mut genome.art, rate, rng);
     mutate_anim(&mut genome.anim, rate, rng);
     mutate_behavior(&mut genome.behavior, rate, rng);
-    brain::mutate_brain(&mut genome.brain, rate, rng, tracker);
+    brain::mutate_brain(&mut genome.brain, rate, diversity, rng, tracker);
     // Complexity ALWAYS mutates — it's the master gene driving morphological evolution.
     // Gating it behind per-gene rate (~15%) made exploration too slow for complexity
     // to increase meaningfully within simulation timescales.
@@ -156,13 +178,13 @@ pub fn genomic_distance(a: &CreatureGenome, b: &CreatureGenome) -> f32 {
     dist
 }
 
-/// Mutate a plant genome in-place. Each float gene has `rate` probability of being perturbed.
-/// Complexity always mutates (like creature genomes). Plants reproduce asexually only —
+/// Mutate a producer genome in-place. Each float gene has `rate` probability of being perturbed.
+/// Complexity always mutates (like creature genomes). Producers reproduce asexually only —
 /// no crossover. Mutation is the sole source of genetic variation.
 ///
 /// Gene ranges enforce ecological constraints: physiology genes (0.3–2.0) allow trade-offs
 /// between Grime's C-S-R strategies; seed_count vs seed_size encodes r/K selection.
-pub fn mutate_plant(genome: &mut PlantGenome, rate: f32, rng: &mut impl Rng) {
+pub fn mutate_producer(genome: &mut ProducerGenome, rate: f32, rng: &mut impl Rng) {
     // Morphology
     perturb(&mut genome.stem_thickness, 0.0, 1.0, rate, rng);
     perturb(&mut genome.height_factor, 0.0, 1.0, rate, rng);
@@ -180,6 +202,10 @@ pub fn mutate_plant(genome: &mut PlantGenome, rate: f32, rng: &mut impl Rng) {
     perturb(&mut genome.seed_size, 0.3, 2.0, rate, rng);
     perturb(&mut genome.lifespan_factor, 0.5, 2.0, rate, rng);
     perturb(&mut genome.nutritional_value, 0.3, 1.5, rate, rng);
+    perturb(&mut genome.clonal_spread, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.nutrient_affinity, 0.3, 1.5, rate, rng);
+    perturb(&mut genome.epiphyte_resistance, 0.0, 1.0, rate, rng);
+    perturb(&mut genome.reserve_allocation, 0.0, 1.0, rate, rng);
 
     // Mutation rate factor mutates slowly (independent of itself)
     perturb(&mut genome.mutation_rate_factor, 0.5, 2.0, 0.05, rng);
@@ -189,8 +215,8 @@ pub fn mutate_plant(genome: &mut PlantGenome, rate: f32, rng: &mut impl Rng) {
     genome.complexity = (genome.complexity + delta).clamp(0.0, 1.0);
 }
 
-/// Genomic distance between two plants for speciation analysis.
-pub fn plant_genomic_distance(a: &PlantGenome, b: &PlantGenome) -> f32 {
+/// Genomic distance between two producer colonies for speciation analysis.
+pub fn producer_genomic_distance(a: &ProducerGenome, b: &ProducerGenome) -> f32 {
     let mut dist = 0.0_f32;
     dist += (a.stem_thickness - b.stem_thickness).abs();
     dist += (a.height_factor - b.height_factor).abs();
@@ -200,6 +226,11 @@ pub fn plant_genomic_distance(a: &PlantGenome, b: &PlantGenome) -> f32 {
     dist += (a.photosynthesis_rate - b.photosynthesis_rate).abs();
     dist += (a.max_energy_factor - b.max_energy_factor).abs();
     dist += (a.hardiness - b.hardiness).abs();
+    dist += (a.nutritional_value - b.nutritional_value).abs();
+    dist += (a.clonal_spread - b.clonal_spread).abs();
+    dist += (a.nutrient_affinity - b.nutrient_affinity).abs();
+    dist += (a.epiphyte_resistance - b.epiphyte_resistance).abs();
+    dist += (a.reserve_allocation - b.reserve_allocation).abs();
     dist += (a.complexity - b.complexity).abs();
     dist
 }
@@ -207,10 +238,12 @@ pub fn plant_genomic_distance(a: &PlantGenome, b: &PlantGenome) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_crossover_produces_valid_genome() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let a = CreatureGenome::random(&mut rng);
             let b = CreatureGenome::random(&mut rng);
@@ -225,14 +258,17 @@ mod tests {
 
     #[test]
     fn test_mutation_stays_in_range() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut tracker = InnovationTracker::new();
         for _ in 0..200 {
             let mut g = CreatureGenome::random(&mut rng);
-            mutate(&mut g, 0.5, &mut rng, &mut tracker);
+            mutate(&mut g, 0.5, 1.0, &mut rng, &mut tracker);
 
-            assert!(g.art.body_size >= 0.2 && g.art.body_size <= 2.0,
-                "body_size out of range: {}", g.art.body_size);
+            assert!(
+                g.art.body_size >= 0.2 && g.art.body_size <= 2.0,
+                "body_size out of range: {}",
+                g.art.body_size
+            );
             assert!(g.art.body_elongation >= 0.0 && g.art.body_elongation <= 1.0);
             assert!(g.art.tail_length >= 0.0 && g.art.tail_length <= 1.5);
             assert!(g.behavior.speed_factor >= 0.5 && g.behavior.speed_factor <= 2.0);
@@ -245,13 +281,13 @@ mod tests {
 
     #[test]
     fn test_genomic_distance_self_is_zero() {
-        let g = CreatureGenome::random(&mut rand::rng());
+        let g = CreatureGenome::random(&mut StdRng::seed_from_u64(42));
         assert!((genomic_distance(&g, &g)).abs() < f32::EPSILON);
     }
 
     #[test]
     fn test_genomic_distance_different_is_positive() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let a = CreatureGenome::random(&mut rng);
         let mut b = a.clone();
         b.art.body_elongation = 1.0 - a.art.body_elongation; // flip elongation
@@ -261,12 +297,12 @@ mod tests {
 
     #[test]
     fn test_mutation_eventually_changes_genome() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut tracker = InnovationTracker::new();
         let original = CreatureGenome::random(&mut rng);
         let mut mutated = original.clone();
         for _ in 0..100 {
-            mutate(&mut mutated, 0.8, &mut rng, &mut tracker);
+            mutate(&mut mutated, 0.8, 1.0, &mut rng, &mut tracker);
         }
         assert!(
             genomic_distance(&original, &mutated) > 0.0,
@@ -281,7 +317,7 @@ mod tests {
     /// large enough to escape the primordial complexity range.
     #[test]
     fn test_complexity_drifts_upward_via_mutation() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut tracker = InnovationTracker::new();
         let mut max_complexity: f32 = 0.0;
 
@@ -291,7 +327,7 @@ mod tests {
 
             for _ in 0..50 {
                 genome.generation += 1;
-                mutate(&mut genome, 0.25, &mut rng, &mut tracker);
+                mutate(&mut genome, 0.25, 1.0, &mut rng, &mut tracker);
             }
 
             max_complexity = max_complexity.max(genome.complexity);
@@ -311,7 +347,7 @@ mod tests {
     /// This proves the brain distance weight reduction (2.0→0.5) works.
     #[test]
     fn test_brain_divergence_preserves_mate_compatibility() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut tracker = InnovationTracker::new();
         let mate_threshold = 8.0;
 
@@ -324,8 +360,8 @@ mod tests {
             let mut lineage_b = ancestor.clone();
 
             for _ in 0..5 {
-                mutate(&mut lineage_a, 0.25, &mut rng, &mut tracker);
-                mutate(&mut lineage_b, 0.25, &mut rng, &mut tracker);
+                mutate(&mut lineage_a, 0.25, 1.0, &mut rng, &mut tracker);
+                mutate(&mut lineage_b, 0.25, 1.0, &mut rng, &mut tracker);
             }
 
             let dist = genomic_distance(&lineage_a, &lineage_b);
@@ -338,7 +374,9 @@ mod tests {
             compatible_count > trials / 2,
             "Most lineages diverging 5 generations should remain compatible. \
              Only {}/{} were compatible (distance < {})",
-            compatible_count, trials, mate_threshold,
+            compatible_count,
+            trials,
+            mate_threshold,
         );
     }
 
@@ -346,7 +384,7 @@ mod tests {
     /// at a fixed 5% rate, independent of the genome's own mutation_rate_factor.
     #[test]
     fn test_mutation_rate_factor_stays_stable() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut tracker = InnovationTracker::new();
         let mut changes = 0;
         let trials = 200;
@@ -354,7 +392,7 @@ mod tests {
         for _ in 0..trials {
             let mut g = CreatureGenome::random(&mut rng);
             let before = g.behavior.mutation_rate_factor;
-            mutate(&mut g, 0.5, &mut rng, &mut tracker);
+            mutate(&mut g, 0.5, 1.0, &mut rng, &mut tracker);
             if (g.behavior.mutation_rate_factor - before).abs() > 0.001 {
                 changes += 1;
             }
@@ -364,7 +402,8 @@ mod tests {
         assert!(
             changes < trials / 3,
             "mutation_rate_factor should mutate slowly (5% rate), but changed {}/{} times",
-            changes, trials,
+            changes,
+            trials,
         );
         assert!(
             changes > 0,
@@ -374,12 +413,12 @@ mod tests {
 
     #[test]
     fn test_pheromone_sensitivity_mutates_in_range() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut genome = CreatureGenome::minimal_cell(&mut rng);
         let mut tracker = InnovationTracker::new();
 
         for _ in 0..1000 {
-            mutate(&mut genome, 1.0, &mut rng, &mut tracker);
+            mutate(&mut genome, 1.0, 1.0, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -396,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_pheromone_sensitivity_inherited_via_crossover() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut parent_a = CreatureGenome::minimal_cell(&mut rng);
         let mut parent_b = CreatureGenome::minimal_cell(&mut rng);
         parent_a.behavior.pheromone_sensitivity = 0.1;
@@ -414,12 +453,12 @@ mod tests {
 
     #[test]
     fn test_learning_rate_stays_in_bounds() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut genome = CreatureGenome::minimal_cell(&mut rng);
         let mut tracker = InnovationTracker::new();
 
         for _ in 0..1000 {
-            mutate(&mut genome, 1.0, &mut rng, &mut tracker);
+            mutate(&mut genome, 1.0, 1.0, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -437,7 +476,7 @@ mod tests {
     /// Verify new genome fields are preserved through crossover.
     #[test]
     fn test_crossover_preserves_new_genes() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut a = CreatureGenome::random(&mut rng);
         let mut b = CreatureGenome::random(&mut rng);
         a.behavior.mutation_rate_factor = 0.5;
@@ -448,13 +487,13 @@ mod tests {
         let child = crossover(&a, &b, &mut rng);
         assert!(
             (child.behavior.mutation_rate_factor - 0.5).abs() < 0.001
-            || (child.behavior.mutation_rate_factor - 2.0).abs() < 0.001,
+                || (child.behavior.mutation_rate_factor - 2.0).abs() < 0.001,
             "Child mutation_rate_factor should be from one parent: {}",
             child.behavior.mutation_rate_factor,
         );
         assert!(
             (child.behavior.mate_preference_hue - 0.0).abs() < 0.001
-            || (child.behavior.mate_preference_hue - 1.0).abs() < 0.001,
+                || (child.behavior.mate_preference_hue - 1.0).abs() < 0.001,
             "Child mate_preference_hue should be from one parent: {}",
             child.behavior.mate_preference_hue,
         );

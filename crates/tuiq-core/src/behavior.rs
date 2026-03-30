@@ -23,7 +23,7 @@ impl BehaviorAction {
     /// Map behavioral action to animation action.
     pub fn to_anim_action(self) -> AnimAction {
         match self {
-            BehaviorAction::Flee => AnimAction::Swim,   // fast swim
+            BehaviorAction::Flee => AnimAction::Swim, // fast swim
             BehaviorAction::Surface => AnimAction::Swim,
             BehaviorAction::Hunt => AnimAction::Swim,
             BehaviorAction::Forage => AnimAction::Swim,

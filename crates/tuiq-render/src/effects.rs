@@ -9,9 +9,9 @@ use ratatui::style::{Color, Style};
 pub struct Bubble {
     pub x: f32,
     pub y: f32,
-    pub size: u8,       // 0 = '.', 1 = 'o', 2 = 'O', 3 = '°'
-    pub rise_speed: f32, // cells per second
-    pub wobble_amp: f32, // amplitude of horizontal wobble
+    pub size: u8,          // 0 = '.', 1 = 'o', 2 = 'O', 3 = '°'
+    pub rise_speed: f32,   // cells per second
+    pub wobble_amp: f32,   // amplitude of horizontal wobble
     pub wobble_phase: f32, // phase offset for wobble
 }
 
@@ -67,10 +67,10 @@ impl BubbleSystem {
             // Varied rise speed: smaller bubbles rise slower
             let size = (self.next_rand() * 4.0) as u8; // 0..3
             let rise_speed = match size {
-                0 => 1.2 + self.next_rand() * 0.6,  // tiny: slow
-                1 => 1.8 + self.next_rand() * 0.8,  // small: medium
-                2 => 2.2 + self.next_rand() * 1.0,  // medium: fast
-                _ => 1.5 + self.next_rand() * 0.5,  // degree: medium
+                0 => 1.2 + self.next_rand() * 0.6, // tiny: slow
+                1 => 1.8 + self.next_rand() * 0.8, // small: medium
+                2 => 2.2 + self.next_rand() * 1.0, // medium: fast
+                _ => 1.5 + self.next_rand() * 0.5, // degree: medium
             };
 
             let wobble_amp = 0.1 + self.next_rand() * 0.5;

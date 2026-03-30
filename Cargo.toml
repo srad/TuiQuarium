@@ -11,4 +11,3 @@ tuiq-core = { path = "crates/tuiq-core" }
 tuiq-render = { path = "crates/tuiq-render" }
 crossterm = "0.28"
 ratatui = "0.29"
-rand = "0.10"

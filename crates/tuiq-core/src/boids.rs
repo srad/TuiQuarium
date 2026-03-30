@@ -61,24 +61,35 @@ pub fn boids_system(
     dt: f32,
 ) {
     // Collect current state of boids
-    let boid_states: Vec<(Entity, f32, f32, f32, f32, f32, BehaviorAction, f32, f32, f32)> = {
+    let boid_states: Vec<(
+        Entity,
+        f32,
+        f32,
+        f32,
+        f32,
+        f32,
+        BehaviorAction,
+        f32,
+        f32,
+        f32,
+    )> = {
         let mut states = Vec::new();
-        for (entity, pos, vel, bbox, behavior, physics, feeding) in
-            &mut world.query::<(
-                Entity,
-                &Position,
-                &Velocity,
-                &BoundingBox,
-                &BehaviorState,
-                &DerivedPhysics,
-                &FeedingCapability,
-            )>()
-        {
+        for (entity, pos, vel, bbox, behavior, physics, feeding) in &mut world.query::<(
+            Entity,
+            &Position,
+            &Velocity,
+            &BoundingBox,
+            &BehaviorState,
+            &DerivedPhysics,
+            &FeedingCapability,
+        )>() {
             if world.get::<&Boid>(entity).is_ok() {
                 states.push((
                     entity,
-                    pos.x, pos.y,
-                    vel.vx, vel.vy,
+                    pos.x,
+                    pos.y,
+                    vel.vx,
+                    vel.vy,
                     bbox.w.max(bbox.h),
                     behavior.action,
                     physics.sensory_range,
@@ -91,138 +102,150 @@ pub fn boids_system(
     };
 
     // Compute forces in parallel (using shared entity_map)
-    let forces: Vec<(Entity, f32, f32)> = boid_states.par_iter().map(
-        |&(entity, px, py, vx, vy, size, action, sensory_range, max_prey_mass, body_mass)| {
-        let mut sep_x = 0.0_f32;
-        let mut sep_y = 0.0_f32;
-        let mut sep_count = 0;
+    let forces: Vec<(Entity, f32, f32)> = boid_states
+        .par_iter()
+        .map(
+            |&(entity, px, py, vx, vy, size, action, sensory_range, max_prey_mass, body_mass)| {
+                let mut sep_x = 0.0_f32;
+                let mut sep_y = 0.0_f32;
+                let mut sep_count = 0;
 
-        let mut align_vx = 0.0_f32;
-        let mut align_vy = 0.0_f32;
-        let mut align_count = 0;
+                let mut align_vx = 0.0_f32;
+                let mut align_vy = 0.0_f32;
+                let mut align_count = 0;
 
-        let mut coh_x = 0.0_f32;
-        let mut coh_y = 0.0_f32;
-        let mut coh_count = 0;
+                let mut coh_x = 0.0_f32;
+                let mut coh_y = 0.0_f32;
+                let mut coh_count = 0;
 
-        let mut seek_target: Option<(f32, f32)> = None;
-        let mut closest_target_dist = f32::MAX;
+                let mut seek_target: Option<(f32, f32)> = None;
+                let mut closest_target_dist = f32::MAX;
 
-        let mut flee_target: Option<(f32, f32)> = None;
-        let mut closest_threat_dist = f32::MAX;
+                let mut flee_target: Option<(f32, f32)> = None;
+                let mut closest_threat_dist = f32::MAX;
 
-        let neighbors = grid.neighbors(px, py, sensory_range.max(params.cohesion_radius));
+                let neighbors = grid.neighbors(px, py, sensory_range.max(params.cohesion_radius));
 
-        for &other in &neighbors {
-            if other == entity {
-                continue;
-            }
+                for &other in &neighbors {
+                    if other == entity {
+                        continue;
+                    }
 
-            let info = match entity_map.get(&other) {
-                Some(i) => i,
-                None => continue,
-            };
+                    let info = match entity_map.get(&other) {
+                        Some(i) => i,
+                        None => continue,
+                    };
 
-            let dx = px - info.x;
-            let dy = py - info.y;
-            let dist = (dx * dx + dy * dy).sqrt().max(0.01);
+                    let dx = px - info.x;
+                    let dy = py - info.y;
+                    let dist = (dx * dx + dy * dy).sqrt().max(0.01);
 
-            // Seek: find edible targets (producers or smaller entities)
-            if action == BehaviorAction::Forage || action == BehaviorAction::Hunt {
-                let is_edible = info.is_producer || info.body_mass < max_prey_mass;
-                if is_edible && dist < sensory_range && dist < closest_target_dist {
-                    closest_target_dist = dist;
-                    seek_target = Some((info.x, info.y));
-                }
-            }
+                    // Seek: find edible targets (producers or smaller entities)
+                    if action == BehaviorAction::Forage || action == BehaviorAction::Hunt {
+                        let is_edible = info.is_producer || info.body_mass < max_prey_mass;
+                        if is_edible && dist < sensory_range && dist < closest_target_dist {
+                            closest_target_dist = dist;
+                            seek_target = Some((info.x, info.y));
+                        }
+                    }
 
-            // Flee: entities that could eat me
-            if action == BehaviorAction::Flee {
-                if info.max_prey_mass > body_mass && info.hunt_skill > 0.3 {
-                    if dist < sensory_range && dist < closest_threat_dist {
-                        closest_threat_dist = dist;
-                        flee_target = Some((info.x, info.y));
+                    // Flee: entities that could eat me
+                    if action == BehaviorAction::Flee {
+                        if info.max_prey_mass > body_mass && info.hunt_skill > 0.3 {
+                            if dist < sensory_range && dist < closest_threat_dist {
+                                closest_threat_dist = dist;
+                                flee_target = Some((info.x, info.y));
+                            }
+                        }
+                    }
+
+                    // Flocking (only with other boids)
+                    if info.is_boid {
+                        let sep_dist = params.separation_radius + size;
+                        if dist < sep_dist {
+                            sep_x += dx / dist;
+                            sep_y += dy / dist;
+                            sep_count += 1;
+                        }
+                        if dist < params.alignment_radius {
+                            align_vx += info.vx;
+                            align_vy += info.vy;
+                            align_count += 1;
+                        }
+                        if dist < params.cohesion_radius {
+                            coh_x += info.x;
+                            coh_y += info.y;
+                            coh_count += 1;
+                        }
                     }
                 }
-            }
 
-            // Flocking (only with other boids)
-            if info.is_boid {
-                let sep_dist = params.separation_radius + size;
-                if dist < sep_dist {
-                    sep_x += dx / dist;
-                    sep_y += dy / dist;
-                    sep_count += 1;
+                let mut force_x = 0.0_f32;
+                let mut force_y = 0.0_f32;
+
+                if let Some((tx, ty)) = seek_target {
+                    let dx = tx - px;
+                    let dy = ty - py;
+                    let dist = (dx * dx + dy * dy).sqrt().max(0.01);
+                    let desired_x = (dx / dist) * params.max_speed;
+                    let desired_y = (dy / dist) * params.max_speed;
+                    force_x += (desired_x - vx) * params.seek_weight;
+                    force_y += (desired_y - vy) * params.seek_weight;
                 }
-                if dist < params.alignment_radius {
-                    align_vx += info.vx;
-                    align_vy += info.vy;
-                    align_count += 1;
+
+                if let Some((tx, ty)) = flee_target {
+                    let dx = px - tx;
+                    let dy = py - ty;
+                    let dist = (dx * dx + dy * dy).sqrt().max(0.01);
+                    let desired_x = (dx / dist) * params.max_speed;
+                    let desired_y = (dy / dist) * params.max_speed;
+                    force_x += (desired_x - vx) * params.flee_weight;
+                    force_y += (desired_y - vy) * params.flee_weight;
                 }
-                if dist < params.cohesion_radius {
-                    coh_x += info.x;
-                    coh_y += info.y;
-                    coh_count += 1;
+
+                if sep_count > 0 {
+                    force_x += (sep_x / sep_count as f32) * params.separation_weight;
+                    force_y += (sep_y / sep_count as f32) * params.separation_weight;
                 }
-            }
-        }
+                if align_count > 0 {
+                    let avg_vx = align_vx / align_count as f32;
+                    let avg_vy = align_vy / align_count as f32;
+                    force_x += (avg_vx - vx) * params.alignment_weight;
+                    force_y += (avg_vy - vy) * params.alignment_weight;
+                }
+                if coh_count > 0 {
+                    let center_x = coh_x / coh_count as f32;
+                    let center_y = coh_y / coh_count as f32;
+                    force_x += (center_x - px) * params.cohesion_weight * 0.01;
+                    force_y += (center_y - py) * params.cohesion_weight * 0.01;
+                }
 
-        let mut force_x = 0.0_f32;
-        let mut force_y = 0.0_f32;
+                // Wall avoidance
+                let wd = params.wall_avoidance_dist;
+                let ww = params.wall_avoidance_weight;
+                if px < wd {
+                    force_x += (wd - px) / wd * ww;
+                }
+                if px > tank_w - wd {
+                    force_x -= (px - (tank_w - wd)) / wd * ww;
+                }
+                if py < wd {
+                    force_y += (wd - py) / wd * ww;
+                }
+                if py > tank_h - wd {
+                    force_y -= (py - (tank_h - wd)) / wd * ww;
+                }
 
-        if let Some((tx, ty)) = seek_target {
-            let dx = tx - px;
-            let dy = ty - py;
-            let dist = (dx * dx + dy * dy).sqrt().max(0.01);
-            let desired_x = (dx / dist) * params.max_speed;
-            let desired_y = (dy / dist) * params.max_speed;
-            force_x += (desired_x - vx) * params.seek_weight;
-            force_y += (desired_y - vy) * params.seek_weight;
-        }
+                let mag = (force_x * force_x + force_y * force_y).sqrt();
+                if mag > params.max_force {
+                    force_x = force_x / mag * params.max_force;
+                    force_y = force_y / mag * params.max_force;
+                }
 
-        if let Some((tx, ty)) = flee_target {
-            let dx = px - tx;
-            let dy = py - ty;
-            let dist = (dx * dx + dy * dy).sqrt().max(0.01);
-            let desired_x = (dx / dist) * params.max_speed;
-            let desired_y = (dy / dist) * params.max_speed;
-            force_x += (desired_x - vx) * params.flee_weight;
-            force_y += (desired_y - vy) * params.flee_weight;
-        }
-
-        if sep_count > 0 {
-            force_x += (sep_x / sep_count as f32) * params.separation_weight;
-            force_y += (sep_y / sep_count as f32) * params.separation_weight;
-        }
-        if align_count > 0 {
-            let avg_vx = align_vx / align_count as f32;
-            let avg_vy = align_vy / align_count as f32;
-            force_x += (avg_vx - vx) * params.alignment_weight;
-            force_y += (avg_vy - vy) * params.alignment_weight;
-        }
-        if coh_count > 0 {
-            let center_x = coh_x / coh_count as f32;
-            let center_y = coh_y / coh_count as f32;
-            force_x += (center_x - px) * params.cohesion_weight * 0.01;
-            force_y += (center_y - py) * params.cohesion_weight * 0.01;
-        }
-
-        // Wall avoidance
-        let wd = params.wall_avoidance_dist;
-        let ww = params.wall_avoidance_weight;
-        if px < wd { force_x += (wd - px) / wd * ww; }
-        if px > tank_w - wd { force_x -= (px - (tank_w - wd)) / wd * ww; }
-        if py < wd { force_y += (wd - py) / wd * ww; }
-        if py > tank_h - wd { force_y -= (py - (tank_h - wd)) / wd * ww; }
-
-        let mag = (force_x * force_x + force_y * force_y).sqrt();
-        if mag > params.max_force {
-            force_x = force_x / mag * params.max_force;
-            force_y = force_y / mag * params.max_force;
-        }
-
-        (entity, force_x, force_y)
-    }).collect();
+                (entity, force_x, force_y)
+            },
+        )
+        .collect();
 
     for (entity, fx, fy) in forces {
         if let Ok(mut vel) = world.get::<&mut Velocity>(entity) {
@@ -241,8 +264,8 @@ pub fn boids_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::*;
     use crate::behavior::BehaviorState;
+    use crate::components::*;
     use crate::phenotype::{DerivedPhysics, FeedingCapability};
     use crate::EntityInfo;
     use std::collections::HashMap;
@@ -257,17 +280,22 @@ mod tests {
                 .get::<&FeedingCapability>(entity)
                 .map(|f| (f.max_prey_mass, f.hunt_skill, f.graze_skill))
                 .unwrap_or((0.0, 0.0, 0.0));
-            m.insert(entity, EntityInfo {
-                x: pos.x, y: pos.y,
-                vx: vel.vx, vy: vel.vy,
-                body_mass: physics.body_mass,
-                max_speed: physics.max_speed,
-                is_producer: false,
-                is_boid,
-                max_prey_mass,
-                hunt_skill,
-                graze_skill,
-            });
+            m.insert(
+                entity,
+                EntityInfo {
+                    x: pos.x,
+                    y: pos.y,
+                    vx: vel.vx,
+                    vy: vel.vy,
+                    body_mass: physics.body_mass,
+                    max_speed: physics.max_speed,
+                    is_producer: false,
+                    is_boid,
+                    max_prey_mass,
+                    hunt_skill,
+                    graze_skill,
+                },
+            );
         }
         m
     }
@@ -386,6 +414,10 @@ mod tests {
         boids_system(&mut world, &grid, &emap, &params, 100.0, 100.0, 1.0);
 
         let v1 = world.get::<&Velocity>(e1).unwrap();
-        assert!(v1.vx > 0.0, "e1 should be pulled right toward group center, got {}", v1.vx);
+        assert!(
+            v1.vx > 0.0,
+            "e1 should be pulled right toward group center, got {}",
+            v1.vx
+        );
     }
 }

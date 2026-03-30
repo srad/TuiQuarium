@@ -50,7 +50,11 @@ impl AsciiFrame {
         let width = rows.iter().map(|r| r.len()).max().unwrap_or(0) as u16;
         let height = rows.len() as u16;
         let rows = rows.into_iter().map(|s| s.to_string()).collect();
-        Self { rows, width, height }
+        Self {
+            rows,
+            width,
+            height,
+        }
     }
 
     /// Return a horizontally flipped version of this frame.
@@ -118,18 +122,92 @@ impl AnimationState {
     }
 }
 
-/// Plant growth stage — derived from energy and age.
+/// Producer colony growth stage — derived from reserve status, biomass fill,
+/// and accumulated stress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlantStage {
-    Seedling,
-    Young,
+pub enum ProducerStage {
+    Cell,
+    Patch,
     Mature,
-    Flowering,
-    Wilting,
+    Broadcasting,
+    Collapsing,
 }
 
-/// Tracks how long a plant has been alive (in simulation seconds).
+/// Tracks how long a producer colony has been alive (in simulation seconds).
 #[derive(Debug, Clone)]
-pub struct PlantAge {
+pub struct ProducerAge {
     pub seconds: f32,
+}
+
+/// Dynamic consumer life-history state.
+///
+/// Research note: aquatic consumer reproduction depends on maturation delay and
+/// sustained energetic surplus rather than a simple elapsed-time timer, so the
+/// model tracks condition, maturation, and reproductive reserves explicitly.
+#[derive(Debug, Clone)]
+pub struct ConsumerState {
+    pub reserve_buffer: f32,
+    pub maturity_progress: f32,
+    pub reproductive_buffer: f32,
+    pub brood_cooldown: f32,
+    pub recent_assimilation: f32,
+}
+
+impl Default for ConsumerState {
+    fn default() -> Self {
+        Self {
+            reserve_buffer: 0.2,
+            maturity_progress: 0.0,
+            reproductive_buffer: 0.0,
+            brood_cooldown: 0.0,
+            recent_assimilation: 0.0,
+        }
+    }
+}
+
+impl ConsumerState {
+    pub fn is_adult(&self) -> bool {
+        self.maturity_progress >= 1.0
+    }
+}
+
+/// How a producer offspring was established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProducerOrigin {
+    Broadcast,
+    Fragment,
+}
+
+/// Dynamic producer state beyond the genome.
+///
+/// `Energy` stores the reserve carbohydrate pool. This component stores
+/// slower-changing biomass pools and local ecological pressure.
+#[derive(Debug, Clone, Default)]
+pub struct ProducerState {
+    /// Long-lived attachment or support biomass.
+    pub structural_biomass: f32,
+    /// Actively photosynthetic biomass exposed to light and grazers.
+    pub leaf_biomass: f32,
+    /// Dormant storage biomass available for recovery after stress.
+    pub belowground_reserve: f32,
+    /// Regenerative potential available for regrowth and local fragmentation.
+    pub meristem_bank: f32,
+    /// Attached or suspended fouling that shades active biomass.
+    pub epiphyte_load: f32,
+    /// Cooldown for broad dispersal propagules.
+    pub seed_cooldown: f32,
+    /// Cooldown for local fragmentation.
+    pub clonal_cooldown: f32,
+    pub stress_time: f32,
+    pub propagule_kind: Option<ProducerOrigin>,
+}
+
+impl ProducerState {
+    pub fn total_biomass(&self) -> f32 {
+        self.structural_biomass + self.leaf_biomass + self.belowground_reserve
+    }
+
+    pub fn aboveground_biomass(&self) -> f32 {
+        self.structural_biomass + self.leaf_biomass
+    }
 }

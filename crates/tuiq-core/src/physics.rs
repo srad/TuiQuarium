@@ -1,13 +1,17 @@
 use hecs::World;
 
-use crate::components::{BoundingBox, Direction, Position, Velocity, Appearance};
+use crate::components::{Appearance, BoundingBox, Direction, Position, Velocity};
 use crate::phenotype::DerivedPhysics;
 
 /// Update positions from velocities and bounce off tank walls.
 pub fn physics_system(world: &mut World, dt: f32, tank_w: f32, tank_h: f32) {
-    for (pos, vel, bbox, appearance, physics) in
-        world.query_mut::<(&mut Position, &mut Velocity, &BoundingBox, &mut Appearance, Option<&DerivedPhysics>)>()
-    {
+    for (pos, vel, bbox, appearance, physics) in world.query_mut::<(
+        &mut Position,
+        &mut Velocity,
+        &BoundingBox,
+        &mut Appearance,
+        Option<&DerivedPhysics>,
+    )>() {
         // Integrate position
         pos.x += vel.vx * dt;
         pos.y += vel.vy * dt;

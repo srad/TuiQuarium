@@ -10,13 +10,13 @@ use tuiq_core::genome::*;
 pub fn generate_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiFrame>) {
     let complexity = genome.complexity;
 
-    if complexity < 0.15 {
+    if complexity < 0.10 {
         // Single character cell
         generate_cell_frames(genome)
-    } else if complexity < 0.35 {
+    } else if complexity < 0.25 {
         // Simple 2-4 char body
         generate_simple_frames(genome)
-    } else if complexity < 0.6 {
+    } else if complexity < 0.5 {
         // Multi-cell body with optional protrusions
         generate_medium_frames(genome)
     } else {
@@ -30,7 +30,7 @@ pub fn genome_color_index(genome: &CreatureGenome) -> u8 {
     genome.art.color_index()
 }
 
-// ── Cell: complexity 0.0–0.15 ────────────────────────────────
+// ── Cell: complexity 0.0–0.10 ────────────────────────────────
 
 fn generate_cell_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiFrame>) {
     let chars = ['.', 'o', '*', 'O', '+', '@'];
@@ -43,11 +43,15 @@ fn generate_cell_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiF
     (swim, idle)
 }
 
-// ── Simple: complexity 0.15–0.35 ─────────────────────────────
+// ── Simple: complexity 0.10–0.25 ─────────────────────────────
 
 fn generate_simple_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiFrame>) {
     let art = &genome.art;
-    let eye = if art.eye_size > 0.2 { art.eye_char() } else { ' ' };
+    let eye = if art.eye_size > 0.2 {
+        art.eye_char()
+    } else {
+        ' '
+    };
 
     // Body width from elongation: round=2, elongated=4
     let body_w = (2.0 + 2.0 * art.body_elongation) as usize;
@@ -73,11 +77,19 @@ fn generate_simple_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
             if eye != ' ' {
                 inner.push(eye);
                 for i in 1..inner_w {
-                    inner.push(if art.pattern_density > 0.3 && i % 2 == 0 { '~' } else { ' ' });
+                    inner.push(if art.pattern_density > 0.3 && i % 2 == 0 {
+                        '~'
+                    } else {
+                        ' '
+                    });
                 }
             } else {
                 for i in 0..inner_w {
-                    inner.push(if art.pattern_density > 0.3 && i % 2 == 0 { '~' } else { ' ' });
+                    inner.push(if art.pattern_density > 0.3 && i % 2 == 0 {
+                        '~'
+                    } else {
+                        ' '
+                    });
                 }
             }
             format!("({inner})")
@@ -86,7 +98,11 @@ fn generate_simple_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
 
     // Optional rear protrusion
     let tail = if art.tail_length > 0.1 && genome.complexity > 0.2 {
-        if art.tail_fork > 0.5 { "=" } else { "-" }
+        if art.tail_fork > 0.5 {
+            "="
+        } else {
+            "-"
+        }
     } else {
         ""
     };
@@ -109,7 +125,7 @@ fn generate_simple_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
     (swim, idle)
 }
 
-// ── Medium: complexity 0.35–0.6 ──────────────────────────────
+// ── Medium: complexity 0.25–0.5 ──────────────────────────────
 
 fn generate_medium_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiFrame>) {
     let art = &genome.art;
@@ -121,9 +137,13 @@ fn generate_medium_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
     let body_w = body_w.min(10);
 
     let eye = art.eye_char();
-    let fill = if art.pattern_density > 0.4 { '~' }
-        else if art.pattern_density > 0.2 { ':' }
-        else { ' ' };
+    let fill = if art.pattern_density > 0.4 {
+        '~'
+    } else if art.pattern_density > 0.2 {
+        ':'
+    } else {
+        ' '
+    };
 
     let has_top = genome.complexity > 0.3 && art.top_appendage > 0.2;
     let has_sides = genome.complexity > 0.3 && art.side_appendages > 0.2;
@@ -185,11 +205,19 @@ fn generate_medium_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
                 if y == 1 && art.eye_size > 0.1 {
                     row[side_offset + 1] = eye;
                     for x in 2..body_w - 1 {
-                        row[side_offset + x] = if (x + y) % 3 == 0 && art.pattern_density > 0.2 { fill } else { ' ' };
+                        row[side_offset + x] = if (x + y) % 3 == 0 && art.pattern_density > 0.2 {
+                            fill
+                        } else {
+                            ' '
+                        };
                     }
                 } else {
                     for x in 1..body_w - 1 {
-                        row[side_offset + x] = if (x + y) % 3 == 0 && art.pattern_density > 0.2 { fill } else { ' ' };
+                        row[side_offset + x] = if (x + y) % 3 == 0 && art.pattern_density > 0.2 {
+                            fill
+                        } else {
+                            ' '
+                        };
                     }
                 }
                 row[side_offset + body_w - 1] = '|';
@@ -201,9 +229,21 @@ fn generate_medium_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
                 for t in 0..tail_len {
                     if tail_start + t < total_w {
                         let ch = match tail_variant {
-                            0 => if art.tail_fork > 0.5 { '=' } else { '-' },
+                            0 => {
+                                if art.tail_fork > 0.5 {
+                                    '='
+                                } else {
+                                    '-'
+                                }
+                            }
                             1 => '~',
-                            _ => if t == tail_len - 1 { '>' } else { '-' },
+                            _ => {
+                                if t == tail_len - 1 {
+                                    '>'
+                                } else {
+                                    '-'
+                                }
+                            }
                         };
                         row[tail_start + t] = ch;
                     }
@@ -221,7 +261,7 @@ fn generate_medium_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asci
     (swim, idle)
 }
 
-// ── Complex: complexity 0.6+ ─────────────────────────────────
+// ── Complex: complexity 0.5+ ─────────────────────────────────
 
 fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<AsciiFrame>) {
     let art = &genome.art;
@@ -233,10 +273,15 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
     let body_w = body_w.min(14);
 
     let eye = art.eye_char();
-    let fill = if art.pattern_density > 0.6 { '#' }
-        else if art.pattern_density > 0.3 { '~' }
-        else if art.pattern_density > 0.1 { ':' }
-        else { ' ' };
+    let fill = if art.pattern_density > 0.6 {
+        '#'
+    } else if art.pattern_density > 0.3 {
+        '~'
+    } else if art.pattern_density > 0.1 {
+        ':'
+    } else {
+        ' '
+    };
 
     let has_top = art.top_appendage > 0.2;
     let has_sides = art.side_appendages > 0.2;
@@ -246,7 +291,11 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
         0
     };
 
-    let top_h = if has_top { (art.top_appendage * 2.0).ceil() as usize } else { 0 };
+    let top_h = if has_top {
+        (art.top_appendage * 2.0).ceil() as usize
+    } else {
+        0
+    };
     let total_w = body_w + tail_len + if has_sides { 2 } else { 0 } + 1;
 
     let side_offset = if has_sides { 1 } else { 0 };
@@ -261,19 +310,27 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
             let spread = (top_h - ty) as usize;
             if ty == 0 {
                 // Tip
-                if apex < total_w { row[apex] = '/'; }
-                if apex + 1 < total_w { row[apex + 1] = '\\'; }
+                if apex < total_w {
+                    row[apex] = '/';
+                }
+                if apex + 1 < total_w {
+                    row[apex + 1] = '\\';
+                }
             } else {
                 // Wider base
                 let left = apex.saturating_sub(spread);
                 let right = (apex + 1 + spread).min(total_w - 1);
-                if left < total_w { row[left] = '/'; }
+                if left < total_w {
+                    row[left] = '/';
+                }
                 for x in (left + 1)..right {
                     if x < total_w {
                         row[x] = if art.pattern_density > 0.4 { '|' } else { ' ' };
                     }
                 }
-                if right < total_w { row[right] = '\\'; }
+                if right < total_w {
+                    row[right] = '\\';
+                }
             }
             rows.push(row.into_iter().collect());
         }
@@ -296,7 +353,9 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
 
             let row_start = side_offset + indent;
             let row_w = body_w.saturating_sub(indent * 2);
-            if row_w < 2 { continue; }
+            if row_w < 2 {
+                continue;
+            }
 
             // Side appendages
             if has_sides && y > 0 && y < body_h - 1 && y == mid_y {
@@ -324,12 +383,20 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
             } else {
                 // Interior with eye and fill
                 let left_ch = if art.body_elongation < 0.4 {
-                    if y < mid_y { '/' } else { '\\' }
+                    if y < mid_y {
+                        '/'
+                    } else {
+                        '\\'
+                    }
                 } else {
                     '|'
                 };
                 let right_ch = if art.body_elongation < 0.4 {
-                    if y < mid_y { '\\' } else { '/' }
+                    if y < mid_y {
+                        '\\'
+                    } else {
+                        '/'
+                    }
                 } else {
                     '|'
                 };
@@ -337,8 +404,12 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
                 row[row_start] = left_ch;
                 if y == 1 && art.eye_size > 0.1 {
                     // Eye row
-                    if row_start + 1 < total_w { row[row_start + 1] = ' '; }
-                    if row_start + 2 < total_w { row[row_start + 2] = eye; }
+                    if row_start + 1 < total_w {
+                        row[row_start + 1] = ' ';
+                    }
+                    if row_start + 2 < total_w {
+                        row[row_start + 2] = eye;
+                    }
                     for x in 3..row_w - 1 {
                         if row_start + x < total_w {
                             row[row_start + x] = if (x + y) % 3 == 0 { fill } else { ' ' };
@@ -366,9 +437,21 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
                     for t in 0..tail_len {
                         if tail_start + t < total_w {
                             let ch = match tail_variant {
-                                0 => if art.tail_fork > 0.5 { '=' } else { '-' },
+                                0 => {
+                                    if art.tail_fork > 0.5 {
+                                        '='
+                                    } else {
+                                        '-'
+                                    }
+                                }
                                 1 => '~',
-                                _ => if t == tail_len - 1 { '>' } else { '-' },
+                                _ => {
+                                    if t == tail_len - 1 {
+                                        '>'
+                                    } else {
+                                        '-'
+                                    }
+                                }
                             };
                             row[tail_start + t] = ch;
                         }
@@ -399,31 +482,39 @@ fn generate_complex_frames(genome: &CreatureGenome) -> (Vec<AsciiFrame>, Vec<Asc
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_generate_produces_non_empty_frames() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..100 {
             let genome = CreatureGenome::random(&mut rng);
             let (swim, idle) = generate_frames(&genome);
             assert!(!swim.is_empty(), "Should have swim frames");
             assert!(!idle.is_empty(), "Should have idle frames");
             for f in &swim {
-                assert!(f.width > 0 && f.height > 0, "Swim frame has zero dimensions");
+                assert!(
+                    f.width > 0 && f.height > 0,
+                    "Swim frame has zero dimensions"
+                );
                 assert!(
                     f.rows.iter().any(|r| r.chars().any(|c| c != ' ')),
                     "Swim frame is all spaces"
                 );
             }
             for f in &idle {
-                assert!(f.width > 0 && f.height > 0, "Idle frame has zero dimensions");
+                assert!(
+                    f.width > 0 && f.height > 0,
+                    "Idle frame has zero dimensions"
+                );
             }
         }
     }
 
     #[test]
     fn test_cell_is_single_char() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..50 {
             let mut g = CreatureGenome::minimal_cell(&mut rng);
             g.complexity = 0.05; // Force cell tier
@@ -435,20 +526,28 @@ mod tests {
 
     #[test]
     fn test_complex_creatures_are_larger() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..50 {
             let mut g = CreatureGenome::random(&mut rng);
             g.complexity = 0.8;
             g.art.body_size = 1.5;
             let (swim, _) = generate_frames(&g);
-            let total_chars: usize = swim[0].rows.iter().map(|r| r.chars().filter(|c| *c != ' ').count()).sum();
-            assert!(total_chars > 3, "Complex creature should have more than 3 visible chars, got {}", total_chars);
+            let total_chars: usize = swim[0]
+                .rows
+                .iter()
+                .map(|r| r.chars().filter(|c| *c != ' ').count())
+                .sum();
+            assert!(
+                total_chars > 3,
+                "Complex creature should have more than 3 visible chars, got {}",
+                total_chars
+            );
         }
     }
 
     #[test]
     fn test_different_complexities_produce_different_sizes() {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(42);
         let mut g = CreatureGenome::random(&mut rng);
         g.art.body_size = 1.0;
 
@@ -466,6 +565,9 @@ mod tests {
         let complex_area = complex_frames[0].width * complex_frames[0].height;
 
         assert!(medium_area > cell_area, "Medium should be bigger than cell");
-        assert!(complex_area > cell_area, "Complex should be bigger than cell");
+        assert!(
+            complex_area > cell_area,
+            "Complex should be bigger than cell"
+        );
     }
 }
