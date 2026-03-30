@@ -32,7 +32,9 @@ impl super::AquariumSim {
         let feeding = derive_feeding(&genome, &physics);
         // Research note: longer consumer generation times reduce unrealistic
         // consumer overshoot relative to producer recovery in small ecosystems.
-        let max_ticks = (48_000.0 * genome.behavior.max_lifespan_factor) as u64;
+        // Calder (1984), Peters (1983): lifespan ∝ mass^0.25 across taxa.
+        let size_longevity = physics.body_mass.max(0.1).powf(0.25);
+        let max_ticks = (48_000.0 * genome.behavior.max_lifespan_factor * size_longevity) as u64;
 
         let vx: f32 = self.rng.random_range(-1.0..1.0);
         let vy: f32 = self.rng.random_range(-0.5..0.5);

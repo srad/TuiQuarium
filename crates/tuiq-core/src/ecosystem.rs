@@ -7,7 +7,7 @@ use hecs::{Entity, World};
 use rayon::prelude::*;
 
 use crate::calibration::EcologyCalibration;
-use crate::components::Position;
+use crate::components::{Position, Velocity};
 use crate::environment::Environment;
 use crate::genome::CreatureGenome;
 use crate::needs::Needs;
@@ -709,31 +709,54 @@ pub fn age_system(world: &mut World) {
 /// A creature can eat another entity if:
 /// - The prey's body_mass < predator's max_prey_mass
 /// - For producers: grazing skill > 0.2
-/// - For mobile prey: hunt_skill > 0.3 AND speed/size advantage
+/// - For mobile prey: hunt_skill > 0.3 AND (pursuit speed advantage OR ambush)
+///
+/// Two predation strategies (Pianka, 1966; Huey & Pianka, 1981):
+/// - **Pursuit**: predator must be fast enough to overtake prey (speed gate)
+/// - **Ambush**: stationary, camouflaged predator strikes nearby prey (Webb, 1984)
+struct EaterInfo {
+    entity: Entity,
+    x: f32,
+    y: f32,
+    max_speed: f32,
+    actual_speed: f32,
+    sensory_range: f32,
+    max_prey_mass: f32,
+    hunt_skill: f32,
+    graze_skill: f32,
+    hunger: f32,
+    camouflage: f32,
+    body_mass: f32,
+}
+
 pub fn hunting_check(
     world: &World,
     grid: &SpatialGrid,
     entity_map: &EntityInfoMap,
 ) -> Vec<(Entity, Entity)> {
     // Collect all creatures with feeding capability (potential eaters)
-    let eaters: Vec<(Entity, f32, f32, f32, f32, f32, f32, f32, f32)> = {
+    let eaters: Vec<EaterInfo> = {
         let mut v = Vec::new();
-        for (entity, pos, physics, feeding) in
-            &mut world.query::<(Entity, &Position, &DerivedPhysics, &FeedingCapability)>()
+        for (entity, pos, physics, feeding, vel) in
+            &mut world.query::<(Entity, &Position, &DerivedPhysics, &FeedingCapability, &Velocity)>()
         {
             if !feeding.is_producer {
                 let hunger = world.get::<&Needs>(entity).map(|n| n.hunger).unwrap_or(1.0);
-                v.push((
+                let actual_speed = (vel.vx * vel.vx + vel.vy * vel.vy).sqrt();
+                v.push(EaterInfo {
                     entity,
-                    pos.x,
-                    pos.y,
-                    physics.max_speed,
-                    physics.sensory_range,
-                    feeding.max_prey_mass,
-                    feeding.hunt_skill,
-                    feeding.graze_skill,
+                    x: pos.x,
+                    y: pos.y,
+                    max_speed: physics.max_speed,
+                    actual_speed,
+                    sensory_range: physics.sensory_range,
+                    max_prey_mass: feeding.max_prey_mass,
+                    hunt_skill: feeding.hunt_skill,
+                    graze_skill: feeding.graze_skill,
                     hunger,
-                ));
+                    camouflage: physics.camouflage,
+                    body_mass: physics.body_mass,
+                });
             }
         }
         v
@@ -742,64 +765,70 @@ pub fn hunting_check(
     // Compute kills in parallel — each eater finds at most one prey
     eaters
         .par_iter()
-        .filter_map(
-            |&(
-                pred_entity,
-                px,
-                py,
-                pred_speed,
-                sense_range,
-                max_prey_mass,
-                hunt_skill,
-                graze_skill,
-                hunger,
-            )| {
-                if hunger < 0.15 {
-                    return None;
+        .filter_map(|eater| {
+            if eater.hunger < 0.15 {
+                return None;
+            }
+            let neighbors = grid.neighbors(eater.x, eater.y, eater.sensory_range);
+            for &prey_entity in &neighbors {
+                if prey_entity == eater.entity {
+                    continue;
                 }
-                let neighbors = grid.neighbors(px, py, sense_range);
-                for &prey_entity in &neighbors {
-                    if prey_entity == pred_entity {
+
+                let prey = match entity_map.get(&prey_entity) {
+                    Some(p) => p,
+                    None => continue,
+                };
+
+                // Research note: grazers can crop tissue from a producer
+                // colony without being able to consume the entire colony as
+                // a single prey item, so whole-body prey-size limits should
+                // only apply to mobile prey.
+                if !prey.is_producer && prey.body_mass > eater.max_prey_mass {
+                    continue;
+                }
+
+                let dx = eater.x - prey.x;
+                let dy = eater.y - prey.y;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if prey.is_producer {
+                    if eater.graze_skill < 0.2 || eater.hunger < 0.15 {
+                        continue;
+                    }
+                    if dist < 6.0 {
+                        return Some((eater.entity, prey_entity));
+                    }
+                } else {
+                    if eater.hunt_skill < 0.3 || eater.hunger < 0.25 {
                         continue;
                     }
 
-                    let prey = match entity_map.get(&prey_entity) {
-                        Some(p) => p,
-                        None => continue,
-                    };
+                    // Pianka (1966): ambush predation — stationary, camouflaged
+                    // predators bypass the pursuit speed requirement.
+                    let speed_ratio = eater.actual_speed / eater.max_speed.max(0.01);
+                    let ambush_factor = (1.0 - speed_ratio.min(1.0)) * eater.camouflage;
 
-                    // Research note: grazers can crop tissue from a producer
-                    // colony without being able to consume the entire colony as
-                    // a single prey item, so whole-body prey-size limits should
-                    // only apply to mobile prey.
-                    if !prey.is_producer && prey.body_mass > max_prey_mass {
-                        continue;
-                    }
-
-                    if prey.is_producer {
-                        if graze_skill < 0.2 || hunger < 0.15 {
-                            continue;
+                    if ambush_factor > 0.35 {
+                        // Webb (1984): strike distance scales with body size
+                        let strike_dist = 2.0 + eater.body_mass.powf(0.33) * 2.0;
+                        if dist < strike_dist {
+                            return Some((eater.entity, prey_entity));
                         }
                     } else {
-                        if hunt_skill < 0.3 || hunger < 0.25 {
+                        // Pursuit: must be fast enough to catch prey
+                        if eater.max_speed < prey.max_speed * 0.8 {
                             continue;
                         }
-                        if pred_speed < prey.max_speed * 0.8 {
-                            continue;
+                        let strike_dist = 2.5 + eater.body_mass.powf(0.33) * 1.0;
+                        if dist < strike_dist {
+                            return Some((eater.entity, prey_entity));
                         }
-                    }
-
-                    let strike_dist = if prey.is_producer { 6.0 } else { 3.0 };
-                    let dx = px - prey.x;
-                    let dy = py - prey.y;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist < strike_dist {
-                        return Some((pred_entity, prey_entity));
                     }
                 }
-                None
-            },
-        )
+            }
+            None
+        })
         .collect()
 }
 
@@ -1413,6 +1442,7 @@ mod tests {
                 hunger: 1.0,
                 ..Default::default()
             },
+            Velocity { vx: 1.0, vy: 0.0 },
         ));
 
         let mut grid = SpatialGrid::new(5.0);
@@ -1491,6 +1521,8 @@ mod tests {
                 is_producer: false,
                 ..Default::default()
             },
+            Velocity { vx: 5.0, vy: 0.0 },
+            Needs { hunger: 1.0, ..Default::default() },
         ));
 
         let mut grid = SpatialGrid::new(5.0);
@@ -1555,6 +1587,8 @@ mod tests {
                 is_producer: false,
                 ..Default::default()
             },
+            Velocity { vx: 5.0, vy: 0.0 },
+            Needs { hunger: 1.0, ..Default::default() },
         ));
 
         let mut grid = SpatialGrid::new(5.0);
@@ -1604,6 +1638,8 @@ mod tests {
                 is_producer: false,
                 ..Default::default()
             },
+            Velocity { vx: 3.0, vy: 0.0 },
+            Needs { hunger: 1.0, ..Default::default() },
         ));
 
         let mut grid = SpatialGrid::new(5.0);
@@ -1702,6 +1738,8 @@ mod tests {
                 is_producer: false,
                 ..Default::default()
             },
+            Velocity { vx: 1.0, vy: 0.0 },
+            Needs { hunger: 1.0, ..Default::default() },
         ));
 
         let mut grid = SpatialGrid::new(5.0);
@@ -2052,6 +2090,8 @@ mod tests {
                     ..Default::default()
                 },
                 genome,
+                Velocity { vx: 1.0, vy: 0.0 },
+                Needs { hunger: 1.0, ..Default::default() },
             ));
 
             let mut grid = SpatialGrid::new(5.0);

@@ -43,7 +43,7 @@ pub struct ArtGenome {
     pub body_elongation: f32,
     /// Body height ratio: 0.0 = flat, 1.0 = tall.
     pub body_height_ratio: f32,
-    /// Overall body size scale factor (0.2–2.0).
+    /// Overall body size scale factor (0.2–5.0).
     pub body_size: f32,
     /// Rear protrusion fork level: 0.0 = pointed, 1.0 = forked.
     pub tail_fork: f32,
@@ -70,7 +70,7 @@ impl ArtGenome {
         Self {
             body_elongation: rng.random_range(0.0..1.0_f32),
             body_height_ratio: rng.random_range(0.0..1.0_f32),
-            body_size: rng.random_range(0.2..2.0_f32),
+            body_size: rng.random_range(0.2..5.0_f32),
             tail_fork: rng.random_range(0.0..1.0_f32),
             tail_length: rng.random_range(0.0..1.5_f32),
             top_appendage: rng.random_range(0.0..1.0_f32),
@@ -442,7 +442,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..200 {
             let g = CreatureGenome::random(&mut rng);
-            assert!(g.art.body_size >= 0.2 && g.art.body_size <= 2.0);
+            assert!(g.art.body_size >= 0.2 && g.art.body_size <= 5.0);
             assert!(g.art.body_elongation >= 0.0 && g.art.body_elongation <= 1.0);
             assert!(g.art.body_height_ratio >= 0.0 && g.art.body_height_ratio <= 1.0);
             assert!(g.art.color_brightness >= 0.0 && g.art.color_brightness <= 1.0);

@@ -565,6 +565,27 @@ Please make sure `cargo test --workspace` passes before submitting.
 - Max Kleiber, [Body Size and Metabolic Rate](https://doi.org/10.1152/physrev.1947.27.4.511) (Physiological Reviews, 1947) &mdash; Kleiber's law: metabolic rate scales with mass^0.75; used for both creature and producer maintenance costs
 - Gillooly et al., [Effects of Size and Temperature on Developmental Time](https://doi.org/10.1038/417070a) (Nature, 2002) &mdash; supports scaling consumer maturation with body size on a weaker timescale than total lifespan in the aquatic founder web
 - Brown et al., [Toward a Metabolic Theory of Ecology](https://doi.org/10.1890/03-9000) (Ecology, 2004) &mdash; supports allometric maintenance and reserve-allocation framing across organisms
+- Bradford A. Calder III, *Size, Function, and Life History* (Harvard University Press, 1984) &mdash; allometric lifespan scaling: lifespan ∝ mass^0.25 across taxa; used for body-mass-dependent consumer longevity
+- Robert Henry Peters, *The Ecological Implications of Body Size* (Cambridge University Press, 1983) &mdash; broad allometric scaling survey; supports mass-dependent lifespan, metabolic rate, and home-range scaling
+
+### Swimming Speed &amp; Locomotion
+
+- Richard Bainbridge, [The Speed of Swimming of Fish as Related to Size and to the Frequency and Amplitude of the Tail Beat](https://doi.org/10.1242/jeb.35.1.109) (Journal of Experimental Biology, 1958) &mdash; burst swimming speed scales positively with body length in fish; informs the speed ∝ body_size^0.35 allometry
+- Daniel M. Ware, [Bioenergetics of Pelagic Fish: Theoretical Change in Swimming Speed and Ration with Body Size](https://doi.org/10.1139/f78-132) (Journal of the Fisheries Research Board of Canada, 1978) &mdash; sustained swimming speed scales with body length; supports positive speed-size exponent for aquatic consumers
+
+### Predation Strategies
+
+- Eric R. Pianka, [Convexity, Desert Lizards, and Spatial Heterogeneity](https://doi.org/10.2307/1934648) (Ecology, 1966) &mdash; sit-and-wait vs active-foraging continuum; informs the dual pursuit/ambush predation model
+- Raymond B. Huey &amp; Eric R. Pianka, [Ecological Consequences of Foraging Mode](https://doi.org/10.2307/1936184) (Ecology, 1981) &mdash; trade-offs between ambush and pursuit predation strategies; supports camouflage-gated ambush hunting
+- Paul W. Webb, [Body and Fin Form and Strike Tactics of Four Teleost Predators Attacking Fathead Minnow Prey](https://doi.org/10.1139/z84-028) (Canadian Journal of Fisheries and Aquatic Sciences, 1984) &mdash; strike distance and kinematics scale with predator body size; informs body-mass-dependent strike range
+- Eleanor M. Caves, Nicholas C. Brandley &amp; Sönke Johnsen, [Visual Acuity and the Evolution of Signals](https://doi.org/10.1016/j.tree.2017.11.003) (Trends in Ecology &amp; Evolution, 2018) &mdash; visual acuity scales with eye diameter and body size; informs size-dependent sensory range cap
+
+### Brain &amp; Intelligence
+
+- Harry J. Jerison, *Evolution of the Brain and Intelligence* (Academic Press, 1973) &mdash; encephalization quotient: brain volume scales as body_mass^0.67 across vertebrates; used for body-size-dependent brain capacity limits
+- Leslie C. Aiello &amp; Peter Wheeler, [The Expensive-Tissue Hypothesis](https://doi.org/10.1086/204350) (Current Anthropology, 1995) &mdash; brain tissue is metabolically expensive (~22× skeletal muscle per gram); used for brain maintenance cost that scales with hidden neuron count
+- Suzana Herculano-Houzel, [The Remarkable, yet Not Extraordinary, Human Brain as a Scaled-Up Primate Brain and Its Associated Cost](https://doi.org/10.1073/pnas.1201895109) (PNAS, 2012) &mdash; neuron count, not brain mass, best predicts cognitive ability; supports scaling brain capacity (node count) rather than a single intelligence parameter
+- Alexander Kotrschal, Bjørn Rogell, Andreas Bundsen et al., [Artificial Selection on Relative Brain Size in the Guppy Reveals Costs and Benefits of Evolving a Larger Brain](https://doi.org/10.1016/j.cub.2013.01.058) (Current Biology, 2013) &mdash; larger-brained guppies had better cognition but reduced gut size; supports the metabolic trade-off between brain capacity and body maintenance
 
 ### Photosynthesis &amp; Light Capture
 

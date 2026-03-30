@@ -94,7 +94,11 @@ pub fn mutate(
     mutate_art(&mut genome.art, rate, rng);
     mutate_anim(&mut genome.anim, rate, rng);
     mutate_behavior(&mut genome.behavior, rate, rng);
-    brain::mutate_brain(&mut genome.brain, rate, diversity, rng, tracker);
+    // Compute body mass to determine brain capacity (Jerison 1973)
+    let plan_mass_factor = 0.6 + 0.6 * (1.0 - genome.art.body_elongation);
+    let body_mass = genome.art.body_size * genome.art.body_size * plan_mass_factor;
+    let effective_cap = brain::effective_max_nodes(body_mass);
+    brain::mutate_brain(&mut genome.brain, rate, diversity, effective_cap, rng, tracker);
     // Complexity ALWAYS mutates — it's the master gene driving morphological evolution.
     // Gating it behind per-gene rate (~15%) made exploration too slow for complexity
     // to increase meaningfully within simulation timescales.
@@ -112,7 +116,7 @@ fn perturb(val: &mut f32, min: f32, max: f32, rate: f32, rng: &mut impl Rng) {
 fn mutate_art(art: &mut ArtGenome, rate: f32, rng: &mut impl Rng) {
     perturb(&mut art.body_elongation, 0.0, 1.0, rate, rng);
     perturb(&mut art.body_height_ratio, 0.0, 1.0, rate, rng);
-    perturb(&mut art.body_size, 0.2, 2.0, rate, rng);
+    perturb(&mut art.body_size, 0.2, 5.0, rate, rng);
     perturb(&mut art.tail_fork, 0.0, 1.0, rate, rng);
     perturb(&mut art.tail_length, 0.0, 1.5, rate, rng);
     perturb(&mut art.top_appendage, 0.0, 1.0, rate, rng);
@@ -249,7 +253,7 @@ mod tests {
             let b = CreatureGenome::random(&mut rng);
             let child = crossover(&a, &b, &mut rng);
 
-            assert!(child.art.body_size >= 0.2 && child.art.body_size <= 2.0);
+            assert!(child.art.body_size >= 0.2 && child.art.body_size <= 5.0);
             assert!(child.behavior.speed_factor >= 0.5 && child.behavior.speed_factor <= 2.0);
             assert!(child.complexity >= 0.0 && child.complexity <= 1.0);
             assert!(child.generation > 0, "Child should have generation > 0");
@@ -265,7 +269,7 @@ mod tests {
             mutate(&mut g, 0.5, 1.0, &mut rng, &mut tracker);
 
             assert!(
-                g.art.body_size >= 0.2 && g.art.body_size <= 2.0,
+                g.art.body_size >= 0.2 && g.art.body_size <= 5.0,
                 "body_size out of range: {}",
                 g.art.body_size
             );

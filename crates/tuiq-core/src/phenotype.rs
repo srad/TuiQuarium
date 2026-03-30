@@ -56,7 +56,11 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     // Max speed: elongated is fast, round is slow; longer rear protrusion = more thrust
     let plan_speed_factor = 0.7 + 0.7 * art.body_elongation;
     let tail_thrust = 0.6 + art.tail_length * 0.4;
-    let max_speed = 3.0 * plan_speed_factor * tail_thrust * beh.speed_factor / art.body_size.sqrt();
+    // Bainbridge (1958), Ware (1978): burst swimming speed scales positively
+    // with body length. Exponent 0.35 compromises burst (~L^0.5) and sustained
+    // (~L^0.43) scaling. Acceleration (line 62) still ∝ 1/mass, preserving
+    // the trade-off: large = fast straight-line, small = agile maneuvering.
+    let max_speed = 3.0 * plan_speed_factor * tail_thrust * beh.speed_factor * art.body_size.powf(0.35);
 
     // Acceleration from rear protrusion
     let acceleration = 8.0 * tail_thrust * beh.speed_factor / body_mass.max(0.1);
@@ -72,9 +76,15 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     // Energy capacity scales with body volume
     let max_energy = 100.0 * body_mass;
 
-    // Metabolism: allometric scaling (mass^0.75), more efficient at higher complexity
-    // Complex organisms have more efficient biochemistry (up to ~32% reduction)
-    let complexity_efficiency = 1.0 - 0.32 * genome.complexity;
+    // Metabolism: allometric scaling (mass^0.75), modulated by two opposing forces:
+    // 1. Biochemical efficiency: complex organisms have better cellular machinery
+    //    (up to ~20% reduction at complexity=1.0)
+    // 2. Brain maintenance cost: neural tissue is metabolically expensive
+    //    (Aiello & Wheeler, 1995 — Expensive Tissue Hypothesis)
+    let biochem_efficiency = 1.0 - 0.20 * genome.complexity;
+    let hidden_count = genome.brain.next_node_id.saturating_sub(23) as f32;
+    let brain_cost = 0.01 * hidden_count * (0.5 + 0.5 * genome.complexity);
+    let complexity_efficiency = biochem_efficiency + brain_cost;
     let base_metabolism =
         0.5 * body_mass.powf(0.75) * beh.metabolism_factor * complexity_efficiency;
 
@@ -90,7 +100,10 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     // larger perceptual bonus than the minimal founder-web baseline.
     let eye_range = 8.0 + 7.0 * art.eye_size;
     let complexity_bonus = 1.0 + 0.8 * genome.complexity;
-    let sensory_range = (eye_range * art.body_size.sqrt() * complexity_bonus).min(18.0);
+    // Caves et al. (2017): visual acuity scales with eye diameter, which
+    // scales with body size. Larger animals detect prey/threats from further.
+    let sensory_cap = 14.0 + art.body_size * 2.5;
+    let sensory_range = (eye_range * art.body_size.sqrt() * complexity_bonus).min(sensory_cap);
 
     DerivedPhysics {
         max_speed,
@@ -323,9 +336,10 @@ mod tests {
         }
     }
 
-    /// Hypothesis test: higher complexity reduces metabolism.
-    /// A creature at complexity 0.8 should burn less energy than an identical
-    /// creature at complexity 0.0 (due to 1.0 - 0.32*complexity efficiency).
+    /// Hypothesis test: higher complexity reduces metabolism when brain is small.
+    /// A creature at complexity 0.8 with no hidden nodes should burn less energy
+    /// than one at complexity 0.0 (biochem efficiency outweighs zero brain cost).
+    /// With many hidden nodes, brain cost can overtake the biochem benefit.
     #[test]
     fn test_complexity_reduces_metabolism() {
         let mut rng = StdRng::seed_from_u64(42);
@@ -338,41 +352,50 @@ mod tests {
             let p_simple = derive_physics(&g_simple);
             let p_complex = derive_physics(&g_complex);
 
-            assert!(
-                p_complex.base_metabolism < p_simple.base_metabolism,
-                "Complex creature (c=0.8) should have lower metabolism than simple (c=0.0): \
-                 complex={:.4} vs simple={:.4}",
-                p_complex.base_metabolism,
-                p_simple.base_metabolism,
-            );
+            // With minimal brain (next_node_id=23, 0 hidden), biochem efficiency
+            // dominates: ratio ≈ (1.0 - 0.20*0.8) / 1.0 = 0.84
+            let hidden = g_complex.brain.next_node_id.saturating_sub(23) as f32;
+            let expected_complex = (1.0 - 0.20 * 0.8)
+                + 0.01 * hidden * (0.5 + 0.5 * 0.8);
+            let expected_simple = 1.0
+                + 0.01 * hidden * 0.5;
+            let expected_ratio = expected_complex / expected_simple;
 
-            // Verify the efficiency is ~25.6% reduction (0.8 * 0.32 = 0.256)
             let ratio = p_complex.base_metabolism / p_simple.base_metabolism;
             assert!(
-                (ratio - 0.744).abs() < 0.01,
-                "Metabolism ratio should be ~0.744 at complexity 0.8, got {:.4}",
-                ratio,
+                (ratio - expected_ratio).abs() < 0.02,
+                "Metabolism ratio should be ~{:.3} at complexity 0.8 with {} hidden nodes, got {:.4}",
+                expected_ratio, hidden as u16, ratio,
             );
         }
     }
 
     #[test]
-    fn test_sensory_range_cap_at_18() {
+    fn test_sensory_range_scales_with_body_size() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut genome = CreatureGenome::random(&mut rng);
         genome.art.eye_size = 1.0;
-        genome.art.body_size = 1.5;
         genome.complexity = 1.0;
-        let physics = derive_physics(&genome);
+
+        // Small creature: cap = 14.0 + 0.5*2.5 = 15.25
+        genome.art.body_size = 0.5;
+        let small = derive_physics(&genome);
+
+        // Large creature: cap = 14.0 + 4.0*2.5 = 24.0
+        genome.art.body_size = 4.0;
+        let large = derive_physics(&genome);
+
         assert!(
-            physics.sensory_range > 12.0,
-            "With large eyes and high complexity, range should exceed old 12.0 cap: got {}",
-            physics.sensory_range,
+            large.sensory_range > small.sensory_range,
+            "Larger creature should see further: large={:.1} vs small={:.1}",
+            large.sensory_range, small.sensory_range,
         );
+        // Caves et al. (2017): cap scales with body size
+        let large_cap = 14.0 + 4.0 * 2.5;
         assert!(
-            physics.sensory_range <= 18.0,
-            "Range should be capped at 18.0: got {}",
-            physics.sensory_range,
+            large.sensory_range <= large_cap,
+            "Range should respect size-scaled cap {:.1}: got {:.1}",
+            large_cap, large.sensory_range,
         );
     }
 

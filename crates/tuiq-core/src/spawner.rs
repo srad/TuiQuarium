@@ -275,7 +275,11 @@ pub fn reproduction_system(
         let bbox_w = 1.0_f32.max(child_genome.art.body_size * 3.0);
         let bbox_h = 1.0_f32.max(child_genome.art.body_size * 2.0);
 
-        let max_ticks = (48_000.0 * child_genome.behavior.max_lifespan_factor) as u64;
+        // Calder (1984), Peters (1983): lifespan ∝ mass^0.25 across taxa.
+        // Larger organisms live proportionally longer, amortizing growth investment.
+        let size_longevity = physics.body_mass.max(0.1).powf(0.25);
+        let max_ticks =
+            (48_000.0 * child_genome.behavior.max_lifespan_factor * size_longevity) as u64;
 
         // Hunger pacing remains evolvable through the genome, while reproductive
         // timing is now derived separately from ConsumerState life-history state.
@@ -579,7 +583,7 @@ mod tests {
         if !births.is_empty() {
             let child_genome = world.get::<&CreatureGenome>(births[0]).unwrap();
             assert!(
-                child_genome.art.body_size >= 0.2 && child_genome.art.body_size <= 2.0,
+                child_genome.art.body_size >= 0.2 && child_genome.art.body_size <= 5.0,
                 "Child body_size {} should be within valid range after crossover + mutation",
                 child_genome.art.body_size
             );

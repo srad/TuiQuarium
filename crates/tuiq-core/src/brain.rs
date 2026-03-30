@@ -124,6 +124,15 @@ const MODULE_DUP_RATE: f64 = 0.005; // rare — copies entire subcircuits
 const MODULATOR_FLIP_RATE: f64 = 0.01;
 const ATTENTION_FLIP_RATE: f64 = 0.005;
 
+/// Jerison (1973): brain volume ∝ body_mass^0.67 across vertebrates.
+/// Larger animals can support more neurons, enabling more complex behavior.
+/// Returns the effective maximum node count for a creature of given body mass.
+pub fn effective_max_nodes(body_mass: f32) -> u16 {
+    let base = 12.0_f32; // minimum: basic sensory-motor wiring
+    let scale = body_mass.max(0.1).powf(0.67) * 28.0;
+    (base + scale).min(MAX_NODES as f32) as u16
+}
+
 // NEAT distance coefficients for speciation.
 // These balance structural vs parametric differences when deciding whether
 // two genomes belong to the same species.
@@ -1267,6 +1276,7 @@ pub fn mutate_brain(
     brain: &mut BrainGenome,
     rate: f32,
     diversity: f32,
+    effective_node_cap: u16,
     rng: &mut impl Rng,
     tracker: &mut InnovationTracker,
 ) {
@@ -1325,7 +1335,7 @@ pub fn mutate_brain(
     }
 
     // 2. Add node: split an enabled connection, preserving network behavior
-    if rng.random_bool(ADD_NODE_RATE * struct_scale) && brain.next_node_id < MAX_NODES {
+    if rng.random_bool(ADD_NODE_RATE * struct_scale) && brain.next_node_id < effective_node_cap {
         let enabled: Vec<usize> = brain
             .connections
             .iter()
@@ -1520,7 +1530,7 @@ pub fn mutate_brain(
         let hidden_count = brain.next_node_id.saturating_sub(FIRST_HIDDEN);
         if hidden_count > 0 {
             let seed_node = FIRST_HIDDEN + rng.random_range(0..hidden_count);
-            duplicate_module(brain, seed_node, rng, tracker);
+            duplicate_module(brain, seed_node, effective_node_cap, rng, tracker);
         }
     }
 }
@@ -1537,6 +1547,7 @@ pub fn mutate_brain(
 fn duplicate_module(
     brain: &mut BrainGenome,
     seed_node: u16,
+    effective_node_cap: u16,
     rng: &mut impl Rng,
     tracker: &mut InnovationTracker,
 ) {
@@ -1559,7 +1570,7 @@ fn duplicate_module(
 
     // Guard: check we have room for the duplicate
     let module_size = module_nodes.len() as u16;
-    if brain.next_node_id + module_size > MAX_NODES {
+    if brain.next_node_id + module_size > effective_node_cap {
         return;
     }
 
@@ -1844,7 +1855,7 @@ mod tests {
         let mut bg = BrainGenome::random(&mut rng);
         let mut tracker = InnovationTracker::new();
         for _ in 0..1000 {
-            mutate_brain(&mut bg, 0.5, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut bg, 0.5, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
         for conn in &bg.connections {
             assert!(
@@ -1871,7 +1882,7 @@ mod tests {
             // few fresh genomes instead of assuming one specific random draw
             // will hit add-node in a fixed number of attempts.
             for _ in 0..100 {
-                mutate_brain(&mut bg, 0.0, 1.0, &mut rng, &mut tracker);
+                mutate_brain(&mut bg, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
             }
 
             saw_added_node |= bg.next_node_id > initial_nodes;
@@ -1911,7 +1922,7 @@ mod tests {
 
         let initial_conns = bg.connections.len();
         for _ in 0..200 {
-            mutate_brain(&mut bg, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut bg, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -1945,7 +1956,7 @@ mod tests {
 
         // Add several structural mutations to b (200 iterations makes flakiness negligible)
         for _ in 0..200 {
-            mutate_brain(&mut b, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut b, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let d = brain_distance(&a, &b);
@@ -2100,7 +2111,7 @@ mod tests {
 
         // Simulate 300 generations of mutation
         for _ in 0..300 {
-            mutate_brain(&mut bg, 0.15, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut bg, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -2472,7 +2483,7 @@ mod tests {
 
         // Mutate 100 times — at 8% rate, expect ~8 node additions
         for _ in 0..100 {
-            mutate_brain(&mut genome, 0.15, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -2492,7 +2503,7 @@ mod tests {
         let initial_conns = genome.connections.len();
 
         for _ in 0..100 {
-            mutate_brain(&mut genome, 0.15, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         assert!(
@@ -2512,7 +2523,7 @@ mod tests {
 
         // First add some hidden nodes so self-connections have targets beyond outputs
         for _ in 0..200 {
-            mutate_brain(&mut genome, 0.15, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let self_loops = genome
@@ -2754,7 +2765,7 @@ mod tests {
         let mut tracker = InnovationTracker::new();
 
         for _ in 0..1000 {
-            mutate_brain(&mut genome, 0.5, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.5, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         for (i, ng) in genome.node_genes.iter().enumerate() {
@@ -2771,7 +2782,7 @@ mod tests {
 
         // First add some hidden nodes
         for _ in 0..50 {
-            mutate_brain(&mut genome, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let initial_activations: Vec<ActivationFn> = genome.node_genes.iter()
@@ -2780,7 +2791,7 @@ mod tests {
 
         // Run many more mutations
         for _ in 0..500 {
-            mutate_brain(&mut genome, 0.1, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let changed = genome.node_genes.iter().enumerate()
@@ -2797,8 +2808,8 @@ mod tests {
 
         // Evolve both parents to have hidden nodes
         for _ in 0..50 {
-            mutate_brain(&mut a, 0.1, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut b, 0.1, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut a, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut b, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let child = crossover_brain(&a, &b, &mut rng);
@@ -2846,7 +2857,7 @@ mod tests {
 
         // Add hidden nodes first
         for _ in 0..100 {
-            mutate_brain(&mut genome, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let has_modulator = genome.node_genes.iter()
@@ -2855,7 +2866,7 @@ mod tests {
         // Even if no modulator yet, run more mutations
         if !has_modulator {
             for _ in 0..500 {
-                mutate_brain(&mut genome, 0.1, 1.0, &mut rng, &mut tracker);
+                mutate_brain(&mut genome, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
             }
         }
 
@@ -2880,7 +2891,7 @@ mod tests {
 
         // Add a hidden node and make it a modulator
         for _ in 0..30 {
-            mutate_brain(&mut genome, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
         // Force a hidden node to be a modulator
         if genome.next_node_id > FIRST_HIDDEN {
@@ -2908,7 +2919,7 @@ mod tests {
 
         // Add hidden nodes
         for _ in 0..30 {
-            mutate_brain(&mut genome, 0.0, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         // Force a hidden node to be attention
@@ -2982,7 +2993,7 @@ mod tests {
 
         // Build up a network with hidden nodes
         for _ in 0..50 {
-            mutate_brain(&mut genome, 0.1, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         let nodes_before = genome.next_node_id;
@@ -2992,7 +3003,7 @@ mod tests {
         let hidden_count = genome.next_node_id.saturating_sub(FIRST_HIDDEN);
         if hidden_count > 0 {
             let seed = FIRST_HIDDEN + rng.random_range(0..hidden_count);
-            duplicate_module(&mut genome, seed, &mut rng, &mut tracker);
+            duplicate_module(&mut genome, seed, MAX_NODES, &mut rng, &mut tracker);
         }
 
         assert!(genome.next_node_id >= nodes_before,
@@ -3018,7 +3029,7 @@ mod tests {
         let mut tracker = InnovationTracker::new();
 
         for _ in 0..300 {
-            mutate_brain(&mut genome, 0.2, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.2, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         // Verify structural integrity
@@ -3082,8 +3093,8 @@ mod tests {
             let mut g2 = g1.clone();
             let w_before: Vec<f32> = g1.connections.iter().map(|c| c.weight).collect();
 
-            mutate_brain(&mut g1, 1.0, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut g2, 1.0, 2.5, &mut rng, &mut tracker);
+            mutate_brain(&mut g1, 1.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut g2, 1.0, 2.5, MAX_NODES, &mut rng, &mut tracker);
 
             for (i, orig) in w_before.iter().enumerate() {
                 if i < g1.connections.len() {
@@ -3121,8 +3132,8 @@ mod tests {
             let mut g_high = g_low.clone();
             let before = g_low.next_node_id;
 
-            mutate_brain(&mut g_low, 0.15, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut g_high, 0.15, 2.5, &mut rng, &mut tracker);
+            mutate_brain(&mut g_low, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut g_high, 0.15, 2.5, MAX_NODES, &mut rng, &mut tracker);
 
             nodes_added_low += (g_low.next_node_id - before) as u32;
             nodes_added_high += (g_high.next_node_id - before) as u32;
@@ -3149,8 +3160,8 @@ mod tests {
             let mut g_high = g_low.clone();
             let before = g_low.connections.len() as i32;
 
-            mutate_brain(&mut g_low, 0.15, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut g_high, 0.15, 2.5, &mut rng, &mut tracker);
+            mutate_brain(&mut g_low, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut g_high, 0.15, 2.5, MAX_NODES, &mut rng, &mut tracker);
 
             conns_added_low += g_low.connections.len() as i32 - before;
             conns_added_high += g_high.connections.len() as i32 - before;
@@ -3177,8 +3188,8 @@ mod tests {
         let mut g1 = base.clone();
         let mut g2 = base.clone();
 
-        mutate_brain(&mut g1, 0.15, 1.0, &mut rng1, &mut tracker1);
-        mutate_brain(&mut g2, 0.15, 1.0, &mut rng2, &mut tracker2);
+        mutate_brain(&mut g1, 0.15, 1.0, MAX_NODES, &mut rng1, &mut tracker1);
+        mutate_brain(&mut g2, 0.15, 1.0, MAX_NODES, &mut rng2, &mut tracker2);
 
         // Same seed, same diversity → identical results
         assert_eq!(g1.connections.len(), g2.connections.len());
@@ -3210,8 +3221,8 @@ mod tests {
             let mut g_low = g.clone();
             let mut g_high = g.clone();
 
-            mutate_brain(&mut g_low, 1.0, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut g_high, 1.0, 2.5, &mut rng, &mut tracker);
+            mutate_brain(&mut g_low, 1.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut g_high, 1.0, 2.5, MAX_NODES, &mut rng, &mut tracker);
 
             let idx = FIRST_HIDDEN as usize;
             if idx < g_low.node_genes.len() && idx < g_high.node_genes.len() {
@@ -3249,8 +3260,8 @@ mod tests {
             let mut g_low = g_def.clone();
             let before = g_def.next_node_id;
 
-            mutate_brain(&mut g_def, 0.15, 1.0, &mut rng, &mut tracker);
-            mutate_brain(&mut g_low, 0.15, 0.25, &mut rng, &mut tracker);
+            mutate_brain(&mut g_def, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
+            mutate_brain(&mut g_low, 0.15, 0.25, MAX_NODES, &mut rng, &mut tracker);
 
             nodes_added_default += (g_def.next_node_id - before) as u32;
             nodes_added_low += (g_low.next_node_id - before) as u32;
@@ -3421,7 +3432,7 @@ mod tests {
 
         // Mutate many times
         for _ in 0..500 {
-            mutate_brain(&mut genome, 0.3, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.3, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         // All trace_decays should be in [0.0, 0.99]
@@ -3575,7 +3586,7 @@ mod tests {
 
         // Mutate heavily to add nodes
         for _ in 0..200 {
-            mutate_brain(&mut genome, 0.15, 1.0, &mut rng, &mut tracker);
+            mutate_brain(&mut genome, 0.15, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
         // Check that new hidden nodes got non-zero trace_decay
