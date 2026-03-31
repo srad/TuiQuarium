@@ -236,9 +236,9 @@ graph TB
 
     Inputs ==> Hidden ==> Outputs
 
-    style Inputs fill:#1e3a5f,stroke:#4a9eff,color:#e0eeff
-    style Hidden fill:#2e1e4f,stroke:#b08aff,color:#e8deff
-    style Outputs fill:#1e3f2a,stroke:#4aff6a,color:#d8f8e0
+    style Inputs fill:#fff,stroke:#4a9eff,color:#333
+    style Hidden fill:#fff,stroke:#b08aff,color:#333
+    style Outputs fill:#fff,stroke:#4aff6a,color:#333
 ```
 
 Networks begin as direct input→output connections (112 weights) and grow via structural mutations:
