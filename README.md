@@ -209,43 +209,36 @@ Every creature has an evolving neural network (NEAT-style) evaluated each tick. 
 ### Network Architecture
 
 ```mermaid
-graph LR
-    subgraph Inputs["Sensory Inputs (16)"]
-        I1[Energy]
-        I2[Hunger]
-        I3[Safety]
-        I4[Reproduction]
-        I5[Food dist/angle]
-        I6[Predator dist/angle]
-        I7[Ally dist/angle]
-        I8[Walls X/Y]
-        I9[Light]
-        I10[Speed]
-        I11[Pheromone conc/grad]
+graph TB
+    subgraph Inputs["🔵 Sensory Inputs · 16 nodes"]
+        direction LR
+        I_body["Energy · Hunger\nSafety · Reproduction"]
+        I_env["Light · Speed\nWall X · Wall Y"]
+        I_target["Food ↕↔\nPredator ↕↔\nAlly ↕↔"]
+        I_chem["Pheromone\nconc · gradient"]
     end
 
-    subgraph Hidden["Evolving Hidden Topology"]
-        direction TB
-        H1["Standard\n(Tanh/ReLU/Sigmoid/Abs/Step/Identity)"]
-        H2["Modulator ⚙\n(gates Oja learning rate)"]
-        H3["Attention 👁\n(softmax-weighted blending)"]
-        H1 -->|self-loop\ntrace memory| H1
+    subgraph Hidden["🟣 Evolving Hidden Layer · up to 60 nodes"]
+        direction LR
+        S["Standard Node\nTanh · ReLU · Sigmoid\nAbs · Step · Identity"]
+        M["Modulator Node\nσ-gated Oja\nlearning rate"]
+        A["Attention Node\nsoftmax-weighted\ninput blending"]
+        T(["Trace Memory\ndecay 0.0–0.99\nself-loop per node"])
+        S -.->|"self-loop"| T
+        M -.->|"gates learning"| S
     end
 
-    subgraph Outputs["Behavioral Outputs (7)"]
-        O1[Steer X/Y]
-        O2[Speed]
-        O3[Forage]
-        O4[Flee]
-        O5[Social]
-        O6[Pheromone]
+    subgraph Outputs["🟢 Behavioral Outputs · 7 nodes"]
+        direction LR
+        O_move["Steer X · Steer Y\nSpeed"]
+        O_behav["Forage · Flee\nSocial · Pheromone"]
     end
 
-    Inputs --> Hidden --> Outputs
+    Inputs ==> Hidden ==> Outputs
 
-    style Inputs fill:#1a3a5c,stroke:#4a9eff,color:#fff
-    style Hidden fill:#2a1a3a,stroke:#9a6aff,color:#fff
-    style Outputs fill:#1a3a2a,stroke:#4aff6a,color:#fff
+    style Inputs fill:#0d253f,stroke:#4a9eff,color:#c8dff8
+    style Hidden fill:#1f0f2e,stroke:#9a6aff,color:#d8c8f8
+    style Outputs fill:#0f2f1a,stroke:#4aff6a,color:#c8f8d8
 ```
 
 Networks begin as direct input→output connections (112 weights) and grow via structural mutations:
