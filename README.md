@@ -1,15 +1,3 @@
-<p align="center">
-  <pre align="center">
-    .---.         .---.           .---.
-   / o o \       / o o \         / o o \
-  (       ) =>  (       ) =>    (       )
-   '-----'       '-----'         '-----'
-    |\ /|         |/ \|           |\ /|
-    | X |         | X |           | X |
-    |/ \|         |\ /|           |/ \|
-  </pre>
-</p>
-
 <h1 align="center">tuiquarium</h1>
 
 <p align="center">
@@ -29,6 +17,10 @@
   continuous genome through mutation, crossover, and natural selection &mdash; rendered<br>
   as procedural ASCII art &mdash; sustained entirely by evolving genome-driven producer colonies.
 </p>
+
+## Simulation video
+
+![tuiquarium_1774917579](https://github.com/user-attachments/assets/983a8bdf-0d2f-4ebc-ac11-ff82f77d5c7d)
 
 ---
 
