@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust&logoColor=white" alt="Rust"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-BUSL--1.1-blue.svg" alt="License: BUSL-1.1"></a>
   <img src="https://img.shields.io/badge/Tests-258_passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Alpha-yellow" alt="Status">
@@ -617,7 +617,7 @@ Please make sure `cargo test --workspace` passes before submitting.
 
 ## License
 
-This project is licensed under the MIT License &mdash; see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Business Source License 1.1** (BUSL-1.1). Non-commercial use is permitted. On **2031-03-31** the code converts to the **Apache License 2.0**. See the [LICENSE](LICENSE) file for details.
 
 ---
 
