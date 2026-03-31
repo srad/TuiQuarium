@@ -68,7 +68,7 @@ fn ecology_line(stats: &SimStats) -> String {
 }
 
 fn controls_line() -> &'static str {
-    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  p:Screenshot  g:Record  ?:Help "
+    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  t:Theme  p:Screenshot  g:Record  ?:Help "
 }
 
 fn sparkline(values: &[f32], target_len: usize) -> String {
@@ -318,6 +318,10 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  d", key_style),
             Span::styled("       Toggle diagnostics panel", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  t", key_style),
+            Span::styled("       Cycle rendering theme (Classic / Ocean)", desc),
         ]),
         Line::from(vec![
             Span::styled("  ?/h", key_style),

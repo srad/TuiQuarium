@@ -12,7 +12,7 @@ use tuiq_core::components::*;
 use tuiq_core::genome::CreatureGenome;
 use tuiq_core::{AquariumSim, Simulation};
 use tuiq_render::ascii::generate_frames;
-use tuiq_render::{DisplayState, Renderer, TuiRenderer};
+use tuiq_render::{DisplayState, Renderer, RenderTheme, TuiRenderer};
 
 const MIN_SIM_SPEED: f32 = 0.5;
 const MAX_SIM_SPEED: f32 = 100.0;
@@ -98,6 +98,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
     let mut speed = 1.0_f32;
     let mut show_diagnostics = false;
     let mut show_help = false;
+    let mut theme = RenderTheme::Ocean;
 
     loop {
         let display = DisplayState {
@@ -107,6 +108,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
             show_help,
             is_recording: renderer.is_recording(),
             recording_secs: renderer.recording_elapsed_secs(),
+            theme,
         };
 
         terminal.draw(|frame| {
@@ -211,6 +213,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
                                     )),
                                 }
                             }
+                        }
+                        KeyCode::Char('t') => {
+                            theme = theme.next();
+                            renderer.flash_message(format!(
+                                "Theme: {}",
+                                theme.label()
+                            ));
                         }
                         _ => {}
                     }

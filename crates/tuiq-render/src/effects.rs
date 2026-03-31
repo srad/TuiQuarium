@@ -140,7 +140,6 @@ impl BubbleSystem {
         } else {
             Color::DarkGray
         };
-        let style = Style::default().fg(color);
 
         for b in &self.bubbles {
             let sx = area.x as i32 + b.x as i32;
@@ -162,7 +161,8 @@ impl BubbleSystem {
             };
 
             if let Some(cell) = buf.cell_mut((sx as u16, sy as u16)) {
-                cell.set_char(ch).set_style(style);
+                let bg = cell.bg;
+                cell.set_char(ch).set_style(Style::default().fg(color).bg(bg));
             }
         }
     }

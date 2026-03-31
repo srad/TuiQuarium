@@ -43,6 +43,33 @@ pub struct DisplayState {
     pub show_help: bool,
     pub is_recording: bool,
     pub recording_secs: u32,
+    pub theme: RenderTheme,
+}
+
+/// Rendering theme: controls background colors and overall look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderTheme {
+    /// Classic dark look — fg-only colors on the terminal default background.
+    Classic,
+    /// Ocean look — colored backgrounds (blue water, brown substrate).
+    Ocean,
+}
+
+impl RenderTheme {
+    /// Cycle to the next theme.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Classic => Self::Ocean,
+            Self::Ocean => Self::Classic,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "Classic",
+            Self::Ocean => "Ocean",
+        }
+    }
 }
 
 /// The main TUI renderer using ratatui.
@@ -98,7 +125,7 @@ impl TuiRenderer {
             footer_rows.min(area.height),
         );
 
-        tank::render_tank(frame, tank_area, sim, &self.bubbles);
+        tank::render_tank(frame, tank_area, sim, &self.bubbles, display.theme);
         hud::render_hud(
             frame,
             hud_area,
@@ -189,6 +216,7 @@ impl Renderer for TuiRenderer {
                 show_help: false,
                 is_recording: false,
                 recording_secs: 0,
+                theme: RenderTheme::Classic,
             },
         );
     }
@@ -231,6 +259,7 @@ mod tests {
                         show_help: false,
                         is_recording: false,
                         recording_secs: 0,
+                        theme: RenderTheme::Classic,
                     },
                 );
             })
@@ -256,6 +285,7 @@ mod tests {
                         show_help: true,
                         is_recording: false,
                         recording_secs: 0,
+                        theme: RenderTheme::Classic,
                     },
                 );
             })
@@ -289,6 +319,7 @@ mod tests {
                         show_help: false,
                         is_recording: false,
                         recording_secs: 0,
+                        theme: RenderTheme::Classic,
                     },
                 );
             })

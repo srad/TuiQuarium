@@ -137,6 +137,7 @@ cargo test --workspace    # 258 passing tests (235 core + 21 render + 2 app)
 | `r` | Reset speed and diversity to defaults (1.0) |
 | `f` | Drop food pellet (manual only; no auto-spawning) |
 | `d` | Toggle ecology diagnostics overlay |
+| `t` | Cycle rendering theme (Classic / Ocean) |
 | `?` / `h` | Toggle help popup (explains all HUD abbreviations) |
 | `p` | Save PNG screenshot to `~/.tuiquarium/screenshots/` |
 | `g` | Toggle GIF recording (output to `~/.tuiquarium/recordings/`) |

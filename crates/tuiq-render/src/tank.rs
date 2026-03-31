@@ -12,11 +12,12 @@ use tuiq_core::{
 
 use crate::effects::BubbleSystem;
 use crate::palette;
+use crate::RenderTheme;
 
 /// Render the aquarium tank: border, water fill, sand substrate, creatures, and effects.
-pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles: &BubbleSystem) {
+pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles: &BubbleSystem, theme: RenderTheme) {
     let env = sim.environment();
-    let pal = palette::palette_for(env);
+    let pal = palette::palette_for(env, theme);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -36,9 +37,9 @@ pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles:
     // Fill water and substrate into the buffer directly
     let substrate_height = 2.min(inner_height);
     let water_height = inner_height.saturating_sub(substrate_height);
-    let water_style = Style::default().fg(pal.water_fg);
-    let sand_style = Style::default().fg(pal.sand);
-    let gravel_style = Style::default().fg(pal.gravel);
+    let water_style = Style::default().fg(pal.water_fg).bg(pal.water_bg);
+    let sand_style = Style::default().fg(pal.sand).bg(pal.sand_bg);
+    let gravel_style = Style::default().fg(pal.gravel).bg(pal.gravel_bg);
 
     let buf = frame.buffer_mut();
 
@@ -126,7 +127,6 @@ fn render_creature(
     let frame_idx = anim.frame_index.min(frame_set.len() - 1);
     let art_frame = &frame_set[frame_idx];
 
-    let creature_style = Style::default().fg(creature_color(appearance.color_index));
     let flip = appearance.facing == Direction::Left;
 
     for (row_idx, row_str) in art_frame.rows.iter().enumerate() {
@@ -150,7 +150,10 @@ fn render_creature(
             let x = area.x + screen_x as u16;
 
             if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_char(ch).set_style(creature_style);
+                // Inherit the background from the water/substrate already painted
+                let bg = cell.bg;
+                cell.set_char(ch)
+                    .set_style(Style::default().fg(creature_color(appearance.color_index)).bg(bg));
             }
         }
     }
