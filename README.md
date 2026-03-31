@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/Tests-250_passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-258_passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Alpha-yellow" alt="Status">
 </p>
@@ -97,12 +97,12 @@
 
 - **Procedural ASCII art** &mdash; 4 complexity tiers for both creatures (cells, simple, medium, complex) and producers (speck, tuft, mat, plume) generated from their respective genomes; no hardcoded art
 - **Boids flocking** &mdash; separation, alignment, cohesion with size-aware spacing and wall avoidance
-- **Allometric metabolism** &mdash; energy cost scales with mass^0.75 for creatures and producers (Kleiber's law)
 - **Day/night cycle** &mdash; sine-based lighting, palette shifts from bright day through dusk to dark night
 - **Random events** &mdash; algae blooms, feeding frenzies, cold snaps (&minus;10°C), earthquakes (every ~60s)
 - **Multi-threaded** &mdash; brain, boids, and hunting systems parallelized with rayon
 - **Soft population cap** &mdash; reproduction suppressed above 600 creatures to maintain responsiveness
 - **HUD overlay** &mdash; population, generation, complexity, species count, diversity coefficient, split creature/producer birth-death counters, day, time, temperature, light, speed, plus a toggleable ecology diagnostics panel and a help popup (`?`) explaining all abbreviations
+- **PNG screenshots &amp; GIF recording** &mdash; `p` saves a full-resolution PNG; `g` toggles streaming GIF recording at configurable resolution and frame rate (see `constants.rs`), ideal for creating evolution time-lapses
 - **Single founder-web startup** &mdash; the visible run starts from low-biomass producer colonies and simple consumer founders, with no hidden warmup
 
 ## Quick Start
@@ -129,7 +129,7 @@ The default visible run starts directly from a simple aquatic founder web:
 ### Run Tests
 
 ```bash
-cargo test --workspace    # 250 passing tests (235 core + 13 render + 2 app)
+cargo test --workspace    # 258 passing tests (235 core + 21 render + 2 app)
 ```
 
 ## Controls
@@ -138,7 +138,7 @@ cargo test --workspace    # 250 passing tests (235 core + 13 render + 2 app)
 |-----|--------|
 | `q` / `Esc` | Quit |
 | `Space` | Pause / Resume |
-| `→` | Speed up (0.5x increments, max 20x) |
+| `→` | Speed up (0.5x increments, max 100x) |
 | `←` | Slow down (0.5x decrements, min 0.5x) |
 | `↑` | Increase diversity coefficient (+0.1, max 2.5) |
 | `↓` | Decrease diversity coefficient (&minus;0.1, min 0.25) |
@@ -146,7 +146,8 @@ cargo test --workspace    # 250 passing tests (235 core + 13 render + 2 app)
 | `f` | Drop food pellet (manual only; no auto-spawning) |
 | `d` | Toggle ecology diagnostics overlay |
 | `?` / `h` | Toggle help popup (explains all HUD abbreviations) |
-| `p` | Save PNG screenshot to `tuiquarium_<timestamp>.png` |
+| `p` | Save PNG screenshot to `~/.tuiquarium/screenshots/` |
+| `g` | Toggle GIF recording (output to `~/.tuiquarium/recordings/`) |
 
 ## Architecture
 
@@ -182,9 +183,12 @@ tuiquarium/
 │   │
 │   └── tuiq-render/          # Ratatui rendering (depends on tuiq-core)
 │       ├── ascii.rs          # Procedural ASCII art generation from genome
+│       ├── constants.rs      # Tunable rendering/recording constants (font sizes, fps)
 │       ├── effects.rs        # Bubble particle system
+│       ├── gif_recorder.rs   # Streaming GIF recorder (terminal buffer → animated GIF)
 │       ├── hud.rs            # Stats overlay (pop, gen, complexity, species, diversity, ...)
 │       ├── palette.rs        # Day/night color palette shifts
+│       ├── screenshot.rs     # Buffer → PNG screenshot rendering
 │       └── tank.rs           # Tank border, water, substrate, creature rendering
 ```
 
@@ -204,10 +208,44 @@ Every creature has an evolving neural network (NEAT-style) evaluated each tick. 
 
 ### Network Architecture
 
-```
-Sensory Inputs (16, Identity)  →  [Evolving Hidden Topology]  →  Outputs (7, per-node activation)
-                                   │ Per-node: ActivationFn + bias + role
-                                   │ Roles: Standard, Modulator, Attention
+```mermaid
+graph LR
+    subgraph Inputs["Sensory Inputs (16)"]
+        I1[Energy]
+        I2[Hunger]
+        I3[Safety]
+        I4[Reproduction]
+        I5[Food dist/angle]
+        I6[Predator dist/angle]
+        I7[Ally dist/angle]
+        I8[Walls X/Y]
+        I9[Light]
+        I10[Speed]
+        I11[Pheromone conc/grad]
+    end
+
+    subgraph Hidden["Evolving Hidden Topology"]
+        direction TB
+        H1["Standard\n(Tanh/ReLU/Sigmoid/Abs/Step/Identity)"]
+        H2["Modulator ⚙\n(gates Oja learning rate)"]
+        H3["Attention 👁\n(softmax-weighted blending)"]
+        H1 -->|self-loop\ntrace memory| H1
+    end
+
+    subgraph Outputs["Behavioral Outputs (7)"]
+        O1[Steer X/Y]
+        O2[Speed]
+        O3[Forage]
+        O4[Flee]
+        O5[Social]
+        O6[Pheromone]
+    end
+
+    Inputs --> Hidden --> Outputs
+
+    style Inputs fill:#1a3a5c,stroke:#4a9eff,color:#fff
+    style Hidden fill:#2a1a3a,stroke:#9a6aff,color:#fff
+    style Outputs fill:#1a3a2a,stroke:#4aff6a,color:#fff
 ```
 
 Networks begin as direct input→output connections (112 weights) and grow via structural mutations:
@@ -355,10 +393,27 @@ This allows the full spectrum from grazers to apex predators to emerge naturally
 
 ### Self-Sustaining Food Web
 
-```
-Sunlight → Producer Photosynthesis → Grazing by Creatures → Death → Detritus
-                 ↑                           ↓                         ↓
-        Producer Reproduction ←── Surviving Producers Recover   Decomposition & Grazing
+```mermaid
+graph TD
+    Sun["☀ Sunlight"] --> Photo["Producer\nPhotosynthesis"]
+    Photo --> Biomass["Producer Biomass"]
+    Biomass --> Graze["Grazing by\nCreatures"]
+    Graze --> Energy["Creature Energy"]
+    Energy --> Repro["Creature\nReproduction"]
+    Energy --> Death["Death"]
+    Death --> Det["Detritus"]
+    Det --> Decomp["Decomposition"]
+    Decomp --> Nutrients["Dissolved N & P"]
+    Nutrients --> Photo
+    Biomass --> PTurnover["Producer Turnover"]
+    PTurnover --> Nutrients
+    Biomass --> PRepro["Producer\nReproduction"]
+    PRepro --> Biomass
+    Energy -->|"Predation"| Energy
+
+    style Sun fill:#f9a825,stroke:#f57f17,color:#000
+    style Nutrients fill:#1565c0,stroke:#0d47a1,color:#fff
+    style Det fill:#6d4c41,stroke:#4e342e,color:#fff
 ```
 
 No artificial food is injected into the ecosystem. Energy enters through producer photosynthesis, but realized producer growth is filtered by canopy shading, water-column attenuation, dissolved nutrients, fouling load, and herbivory.
@@ -387,17 +442,18 @@ No artificial food is injected into the ecosystem. Energy enters through produce
 | Prey Type | Requirements |
 |-----------|-------------|
 | **Plants** | graze_skill &gt; 0.2, non-trivial hunger/energy deficit, within 4 cells |
-| **Mobile prey** | hunt_skill &gt; 0.3, hunger/energy deficit, predator speed &ge; 0.8&times; prey speed, prey mass &lt; max_prey_mass, within 3 cells |
+| **Mobile prey (pursuit)** | hunt_skill &gt; 0.3, predator speed &ge; 0.6&times; prey speed, prey mass &lt; max_prey_mass, within 2.5 + mass^0.33 cells |
+| **Mobile prey (ambush)** | ambush factor (low speed ratio &times; camouflage) &gt; 0.35, within 2.0 + mass^0.33 &times; 2.0 cells; enables slow, camouflaged predators |
 
 ## Evolutionary Tradeoffs
 
 | Trait | Benefit | Cost |
 |-------|---------|------|
-| Large body | More energy storage, can hunt larger prey | Higher metabolism, slower movement |
+| Large body | More energy storage, can hunt larger prey, larger brain capacity, longer lifespan | Higher metabolism |
 | Streamlined (elongated) | Faster, lower drag coefficient | Less energy storage |
 | Bright colors | Higher visibility to allies | Attracts predators |
-| Large eyes | Better sensory range (up to 18 cells) | Slight metabolism cost |
-| High complexity | +50% sensory range, ~25% metabolism efficiency, richer morphology | Must find compatible mates to reproduce |
+| Large eyes | Better sensory range (scales with body size) | Slight metabolism cost |
+| High complexity | +50% sensory range, ~20% metabolism efficiency, richer morphology | Must find compatible mates, brain maintenance cost |
 | High aggression | Better hunt_skill, can target mobile prey | Lower graze_skill |
 | High timidity | Better flee response, avoids predators | Less time foraging |
 
@@ -446,7 +502,7 @@ Optimized for 600+ creatures at 20 ticks/sec:
 | Rayon parallelism | Brain, boids, hunting run on multiple cores |
 | Shared `EntityInfoMap` | One world query + one HashMap per tick (not three) |
 | Spatial hash grid (cell_size=6) | Distance-filtered neighbor queries in ~O(1) |
-| Sensory range cap (18.0) | Prevents tank-wide scans that defeat spatial partitioning |
+| Sensory range cap (scales with body size) | Prevents tank-wide scans that defeat spatial partitioning |
 | Stats caching | Species/complexity recomputed every 20 ticks, not every frame |
 | Zero-alloc rendering | Left-facing flip by index reversal, no string cloning |
 | Soft population cap (600) | Reproduction suppressed to maintain frame rate |
@@ -460,6 +516,9 @@ Optimized for 600+ creatures at 20 ticks/sec:
 | [crossterm](https://crates.io/crates/crossterm) | 0.28 | Cross-platform terminal I/O |
 | [rand](https://crates.io/crates/rand) | 0.10 | RNG for procedural generation + simulation |
 | [rayon](https://crates.io/crates/rayon) | 1.10 | Data-parallel computation for brain/boids/hunting |
+| [fontdue](https://crates.io/crates/fontdue) | 0.9 | Font rasterization for screenshots and GIF recording |
+| [image](https://crates.io/crates/image) | 0.25 | PNG screenshot encoding |
+| [gif](https://crates.io/crates/gif) | 0.13 | Streaming animated GIF encoding |
 
 ## Algorithms
 
@@ -485,37 +544,9 @@ Optimized for 600+ creatures at 20 ticks/sec:
 
 ## Roadmap
 
-- [x] Neural network brains &mdash; evolved feedforward networks drive creature behavior
-- [x] NEAT topology evolution &mdash; evolve network structure (add nodes/connections), not just weights
-- [x] Hebbian learning &mdash; Oja's rule lifetime weight plasticity with evolvable learning rate (Baldwin Effect)
-- [x] Emergent evolution &mdash; continuous genome, no predefined species
-- [x] Multi-threaded simulation &mdash; rayon parallelism for brain/boids/hunting
-- [x] Performance optimization &mdash; shared entity maps, spatial capping
-- [x] Self-sustaining ecosystem &mdash; producer photosynthesis replaces artificial food rain
-- [x] Partial grazing &mdash; producer colonies survive being eaten and regenerate
-- [x] Producer reproduction &mdash; reserve-cost broadcast and fragment propagation with establishment filters
-- [x] Genome-driven producers &mdash; 20-float `ProducerGenome` with allometric scaling, LAI-style light capture, nutrient limitation, and procedural ASCII art
-- [x] Complexity-driven evolution &mdash; sensory and metabolism bonuses reward complexity
-- [x] Nutrient cycling &mdash; dead creatures become grazable detritus entities
-- [x] Rasterized light field &mdash; continuous depth and canopy shading instead of hard depth zones
-- [x] Fitness sharing &mdash; NEAT-style speciation protects novel innovations
-- [x] Evolvable mutation rate &mdash; meta-evolution tunes mutation rates per lineage
-- [x] Sexual selection &mdash; Fisherian runaway via mate color preference
-- [x] Nutrient-limited producer ecology &mdash; Monod-style resource limitation, gradual senescence, and demand-limited grazing
-- [x] Pheromone signaling &mdash; grid-based chemical communication with decay, diffusion, and gradient sensing
-- [x] Runtime diversity coefficient &mdash; ↑/↓ keys scale mutation rates and fitness sharing for interactive evolutionary tuning
-- [x] Substrate zones &mdash; procedural Sandy/Rocky/Planted substrate affecting producer establishment and clonal spread
-- [x] Nutrient resilience &mdash; nitrogen fixation, increased benthic P release, and nutrient floor prevent irreversible crashes
-- [x] Trait-based system architecture &mdash; modular trait abstractions for brain, ecosystem, hunting, reproduction, and producer lifecycle
-- [x] Evolvable activation functions &mdash; per-node activation (Tanh/ReLU/Sigmoid/Abs/Step/Identity) evolved through swap mutations
-- [x] Per-node bias &mdash; evolvable bias terms with Oja-like lifetime updates
-- [x] Neuromodulation &mdash; Modulator nodes gate Oja learning rate for selective plasticity
-- [x] Attention mechanism &mdash; Attention nodes compute softmax-weighted input blends
-- [x] Module duplication &mdash; mutation copies connected subgraphs for functional modularity
 - [ ] Save/load simulation state (serde serialization)
 - [ ] Terminal resize handling
 - [ ] Configuration file for simulation parameters
-- [ ] Debug overlay (toggle with `d`)
 
 ## Contributing
 

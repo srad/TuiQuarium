@@ -8,6 +8,7 @@ tuiq-core = { path = "../tuiq-core" }
 ratatui = "0.29"
 image = { version = "0.25", default-features = false, features = ["png"] }
 fontdue = "0.9"
+gif = "0.13"
 
 [dev-dependencies]
 rand = "0.10.0"

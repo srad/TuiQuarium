@@ -1,5 +1,7 @@
 pub mod ascii;
+pub mod constants;
 pub mod effects;
+pub mod gif_recorder;
 pub mod hud;
 pub mod palette;
 pub mod screenshot;
@@ -8,14 +10,13 @@ pub mod tank;
 use std::path::Path;
 use std::time::Instant;
 
+use constants::FLASH_DURATION_SECS;
 use effects::BubbleSystem;
+use gif_recorder::GifRecorder;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use tuiq_core::Simulation;
-
-/// Duration a flash message stays visible.
-const FLASH_DURATION_SECS: f32 = 3.0;
 
 /// Abstraction over rendering. Could be swapped for a test renderer.
 pub trait Renderer {
@@ -40,6 +41,8 @@ pub struct DisplayState {
     pub speed: f32,
     pub show_diagnostics: bool,
     pub show_help: bool,
+    pub is_recording: bool,
+    pub recording_secs: u32,
 }
 
 /// The main TUI renderer using ratatui.
@@ -47,6 +50,7 @@ pub struct TuiRenderer {
     bubbles: BubbleSystem,
     last_buffer: Option<Buffer>,
     flash: Option<(String, Instant)>,
+    recorder: Option<GifRecorder>,
 }
 
 impl TuiRenderer {
@@ -55,6 +59,7 @@ impl TuiRenderer {
             bubbles: BubbleSystem::new(),
             last_buffer: None,
             flash: None,
+            recorder: None,
         }
     }
 
@@ -103,6 +108,8 @@ impl TuiRenderer {
             display.paused,
             display.speed,
             sim.diversity_coefficient(),
+            display.is_recording,
+            display.recording_secs,
         );
 
         if display.show_help {
@@ -120,6 +127,53 @@ impl TuiRenderer {
 
         // Cache the completed buffer so save_screenshot() can use it.
         self.last_buffer = Some(frame.buffer_mut().clone());
+
+        // Capture a GIF frame if recording (self-throttles to ~10 fps).
+        if let Some(recorder) = &mut self.recorder {
+            if let Some(buf) = &self.last_buffer {
+                if let Err(e) = recorder.add_frame(buf) {
+                    let msg = format!("Recording error: {e}");
+                    // Stop the broken recorder and flash an error.
+                    self.recorder = None;
+                    self.flash = Some((msg, Instant::now()));
+                }
+            }
+        }
+    }
+
+    /// Start GIF recording to the given path. Returns an error if a
+    /// recording is already in progress or the encoder cannot be created.
+    pub fn start_recording(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.recorder.is_some() {
+            return Err("Already recording".into());
+        }
+        let buffer = self
+            .last_buffer
+            .as_ref()
+            .ok_or("No frame rendered yet — cannot determine dimensions")?;
+        let recorder = GifRecorder::start(buffer, path)?;
+        self.recorder = Some(recorder);
+        Ok(())
+    }
+
+    /// Stop the current recording. Returns the output path and frame count,
+    /// or `None` if no recording was in progress.
+    pub fn stop_recording(&mut self) -> Option<(std::path::PathBuf, u32)> {
+        self.recorder.take().map(|r| r.stop())
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    pub fn recording_elapsed_secs(&self) -> u32 {
+        self.recorder
+            .as_ref()
+            .map(|r| r.elapsed().as_secs() as u32)
+            .unwrap_or(0)
     }
 }
 
@@ -133,6 +187,8 @@ impl Renderer for TuiRenderer {
                 speed: 1.0,
                 show_diagnostics: false,
                 show_help: false,
+                is_recording: false,
+                recording_secs: 0,
             },
         );
     }
@@ -173,6 +229,8 @@ mod tests {
                         speed: 1.0,
                         show_diagnostics: true,
                         show_help: false,
+                        is_recording: false,
+                        recording_secs: 0,
                     },
                 );
             })
@@ -196,6 +254,8 @@ mod tests {
                         speed: 1.0,
                         show_diagnostics: false,
                         show_help: true,
+                        is_recording: false,
+                        recording_secs: 0,
                     },
                 );
             })
@@ -227,6 +287,8 @@ mod tests {
                         speed: 1.0,
                         show_diagnostics: false,
                         show_help: false,
+                        is_recording: false,
+                        recording_secs: 0,
                     },
                 );
             })

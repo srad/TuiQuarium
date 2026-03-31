@@ -4,12 +4,13 @@ use fontdue::{Font, FontSettings};
 use ratatui::buffer::Buffer;
 use ratatui::style::Color;
 
+use crate::constants::SCREENSHOT_FONT_SIZE;
+
 const FONT_BYTES: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
-const FONT_SIZE: f32 = 20.0;
 
 /// Convert a ratatui [`Buffer`] to a PNG file at `path`.
 ///
-/// Each terminal cell is rendered with JetBrains Mono at [`FONT_SIZE`] px.
+/// Each terminal cell is rendered with JetBrains Mono at [`SCREENSHOT_FONT_SIZE`] px.
 /// The cell dimensions are derived from the font metrics so the output
 /// faithfully reflects what a monospace terminal would show.
 pub fn save_buffer_as_png(buffer: &Buffer, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -17,10 +18,10 @@ pub fn save_buffer_as_png(buffer: &Buffer, path: &Path) -> Result<(), Box<dyn st
         .map_err(|e| format!("failed to load embedded font: {e}"))?;
 
     // Derive cell size from the font metrics of a reference character.
-    let metrics = font.metrics('M', FONT_SIZE);
+    let metrics = font.metrics('M', SCREENSHOT_FONT_SIZE);
     let cell_w = metrics.advance_width.ceil() as u32;
     let line_metrics = font
-        .horizontal_line_metrics(FONT_SIZE)
+        .horizontal_line_metrics(SCREENSHOT_FONT_SIZE)
         .ok_or("font has no horizontal line metrics")?;
     let cell_h = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap)
         .ceil() as u32;
@@ -55,7 +56,7 @@ pub fn save_buffer_as_png(buffer: &Buffer, path: &Path) -> Result<(), Box<dyn st
             }
 
             // Rasterize the glyph and composite it onto the cell.
-            let (gm, bitmap) = font.rasterize(ch, FONT_SIZE);
+            let (gm, bitmap) = font.rasterize(ch, SCREENSHOT_FONT_SIZE);
             if bitmap.is_empty() {
                 continue;
             }
@@ -114,7 +115,7 @@ pub fn screenshots_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error
 }
 
 /// Convert a ratatui [`Color`] to an RGB byte triple.
-fn color_to_rgb(color: Color) -> [u8; 3] {
+pub(crate) fn color_to_rgb(color: Color) -> [u8; 3] {
     match color {
         Color::Reset => [12, 12, 12],
         Color::Black => [12, 12, 12],
@@ -139,7 +140,7 @@ fn color_to_rgb(color: Color) -> [u8; 3] {
 }
 
 /// Map a 256-color palette index to RGB.
-fn indexed_to_rgb(i: u8) -> [u8; 3] {
+pub(crate) fn indexed_to_rgb(i: u8) -> [u8; 3] {
     match i {
         0 => [12, 12, 12],
         1 => [197, 15, 31],

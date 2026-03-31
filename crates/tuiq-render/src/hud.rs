@@ -18,25 +18,25 @@ fn total_producer_biomass(stats: &SimStats) -> f32 {
 
 fn status_line(stats: &SimStats, env: &Environment, paused: bool, speed: f32, diversity: f32) -> String {
     let time_str = format_time(env.time_of_day);
-    let day_night = if env.is_night() { "Night" } else { "Day" };
-    let temp_str = format!("{:.0}C", env.temperature);
-    let light_str = format!("{:.0}%", env.light_level * 100.0);
+    let day_night = if env.is_night() { "Night " } else { "Day   " };
+    let temp_str = format!("{:>3.0}C", env.temperature);
+    let light_str = format!("{:>3.0}%", env.light_level * 100.0);
 
     let event_str = match &env.active_event {
         Some(e) => match e.kind {
-            EventKind::AlgaeBloom => format!(" | ALGAE {:.0}s", e.remaining),
-            EventKind::FeedingFrenzy => format!(" | FRENZY {:.0}s", e.remaining),
-            EventKind::ColdSnap => format!(" | COLD {:.0}s", e.remaining),
-            EventKind::Earthquake => format!(" | QUAKE {:.0}s", e.remaining),
+            EventKind::AlgaeBloom => format!(" | ALGAE {:>3.0}s", e.remaining),
+            EventKind::FeedingFrenzy => format!(" | FRENZY {:>3.0}s", e.remaining),
+            EventKind::ColdSnap => format!(" | COLD {:>3.0}s", e.remaining),
+            EventKind::Earthquake => format!(" | QUAKE {:>3.0}s", e.remaining),
         },
         None => String::new(),
     };
 
     let pause_str = if paused { " [PAUSED]" } else { "" };
-    let speed_str = format!("{:.1}x", speed);
+    let speed_str = format!("{:>5.1}x", speed);
 
     format!(
-        " Pop:{} | Gen:{} | Cx:{:.2} | Sp:{} | Div:{:.2} | Day {} {} {} {} | Light:{} | {}{}{} ",
+        " Pop:{:>3} | Gen:{:>4} | Cx:{:.2} | Sp:{:>2} | Div:{:.2} | Day {:>4} {} {} {} | Light:{} | {}{}{} ",
         stats.creature_count,
         stats.max_generation,
         stats.avg_complexity,
@@ -55,7 +55,7 @@ fn status_line(stats: &SimStats, env: &Environment, paused: bool, speed: f32, di
 
 fn ecology_line(stats: &SimStats) -> String {
     format!(
-        " C B/D:{}/{} | Prod B/D:{}/{} | A/J:{}/{} | ProdBio:{:.1} | NPP:{:.2} ",
+        " C B/D:{:>3}/{:<3} | Prod B/D:{:>4}/{:<4} | A/J:{:>3}/{:<3} | ProdBio:{:>7.1} | NPP:{:>5.2} ",
         stats.creature_births,
         stats.creature_deaths,
         stats.producer_births,
@@ -68,7 +68,7 @@ fn ecology_line(stats: &SimStats) -> String {
 }
 
 fn controls_line() -> &'static str {
-    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  ?:Help "
+    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  p:Screenshot  g:Record  ?:Help "
 }
 
 fn sparkline(values: &[f32], target_len: usize) -> String {
@@ -178,6 +178,8 @@ pub fn render_hud(
     paused: bool,
     speed: f32,
     diversity: f32,
+    is_recording: bool,
+    recording_secs: u32,
 ) {
     if area.height < 1 {
         return;
@@ -199,34 +201,61 @@ pub fn render_hud(
         }
     }
 
-    let lines = [
-        (
-            status_line(stats, env, paused, speed, diversity),
-            Alignment::Left,
+    let rec_suffix = if is_recording {
+        format!(" ● REC {:02}:{:02}", recording_secs / 60, recording_secs % 60)
+    } else {
+        String::new()
+    };
+
+    let status_text = status_line(stats, env, paused, speed, diversity);
+    let ecology_text = ecology_line(stats);
+    let controls_text = controls_line().to_string();
+
+    let footer_start = area.y + area.height.saturating_sub(3);
+
+    // Row 0: Status line (white) + optional REC indicator (red).
+    if area.height >= 1 {
+        let y = footer_start;
+        let line_area = Rect::new(area.x, y, area.width, 1);
+        let mut spans = vec![Span::styled(
+            status_text,
             Style::default().fg(Color::White),
-        ),
-        (
-            ecology_line(stats),
-            Alignment::Left,
+        )];
+        if is_recording {
+            spans.push(Span::styled(
+                rec_suffix,
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        let widget = Paragraph::new(Line::from(spans)).alignment(Alignment::Left);
+        frame.render_widget(widget, line_area);
+    }
+
+    // Row 1: Ecology line.
+    if area.height >= 2 {
+        let y = footer_start + 1;
+        let line_area = Rect::new(area.x, y, area.width, 1);
+        let widget = Paragraph::new(Line::from(vec![Span::styled(
+            ecology_text,
             Style::default().fg(Color::Gray),
-        ),
-        (
-            controls_line().to_string(),
-            Alignment::Center,
+        )]))
+        .alignment(Alignment::Left);
+        frame.render_widget(widget, line_area);
+    }
+
+    // Row 2: Controls hint.
+    if area.height >= 3 {
+        let y = footer_start + 2;
+        let line_area = Rect::new(area.x, y, area.width, 1);
+        let widget = Paragraph::new(Line::from(vec![Span::styled(
+            controls_text,
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
-        ),
-    ];
-
-    let footer_start = area.y + area.height.saturating_sub(3);
-    let visible_rows = area.height.min(lines.len() as u16) as usize;
-    for row in 0..visible_rows {
-        let y = footer_start + row as u16;
-        let line_area = Rect::new(area.x, y, area.width, 1);
-        let (text, alignment, style) = &lines[row];
-        let widget = Paragraph::new(Line::from(vec![Span::styled(text.clone(), *style)]))
-            .alignment(*alignment);
+        )]))
+        .alignment(Alignment::Center);
         frame.render_widget(widget, line_area);
     }
 }
@@ -297,6 +326,10 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  p", key_style),
             Span::styled("       Save PNG screenshot", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  g", key_style),
+            Span::styled("       Toggle GIF recording", desc),
         ]),
         Line::from(Span::raw("")),
         Line::from(vec![Span::styled("  Status Bar", header)]),
@@ -477,10 +510,10 @@ mod tests {
             ..SimStats::default()
         };
         let line = ecology_line(&stats);
-        assert!(line.contains("C B/D:2/1"));
-        assert!(line.contains("Prod B/D:7/3"));
-        assert!(line.contains("A/J:4/6"));
-        assert!(line.contains("ProdBio:15.0"));
+        assert!(line.contains("C B/D:  2/1"));
+        assert!(line.contains("Prod B/D:   7/3"));
+        assert!(line.contains("A/J:  4/6"));
+        assert!(line.contains("ProdBio:   15.0"));
     }
 
     #[test]
@@ -555,8 +588,8 @@ mod tests {
             ..SimStats::default()
         };
         let line = status_line(&stats, &env, false, 2.0, 1.0);
-        assert!(line.contains("Pop:5"));
-        assert!(line.contains("Day 5 08:30 Day"));
+        assert!(line.contains("Pop:  5"));
+        assert!(line.contains("Day    5 08:30 Day"));
         assert!(line.contains("2.0x"));
     }
 

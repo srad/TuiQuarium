@@ -105,6 +105,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
             speed,
             show_diagnostics,
             show_help,
+            is_recording: renderer.is_recording(),
+            recording_secs: renderer.recording_elapsed_secs(),
         };
 
         terminal.draw(|frame| {
@@ -178,6 +180,36 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
                                 Err(e) => renderer.flash_message(format!(
                                     "Cannot create screenshot dir: {e}"
                                 )),
+                            }
+                        }
+                        KeyCode::Char('g') => {
+                            if renderer.is_recording() {
+                                if let Some((path, count)) = renderer.stop_recording() {
+                                    renderer.flash_message(format!(
+                                        "Recording saved: {} ({count} frames)",
+                                        path.display()
+                                    ));
+                                }
+                            } else {
+                                let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs();
+                                match tuiq_render::gif_recorder::recordings_dir() {
+                                    Ok(dir) => {
+                                        let path =
+                                            dir.join(format!("tuiquarium_{ts}.gif"));
+                                        match renderer.start_recording(path) {
+                                            Ok(()) => {}
+                                            Err(e) => renderer.flash_message(format!(
+                                                "Recording failed: {e}"
+                                            )),
+                                        }
+                                    }
+                                    Err(e) => renderer.flash_message(format!(
+                                        "Cannot create recordings dir: {e}"
+                                    )),
+                                }
                             }
                         }
                         _ => {}
