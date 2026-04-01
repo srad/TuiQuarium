@@ -87,9 +87,10 @@ pub fn render_tank(frame: &mut Frame, area: Rect, sim: &dyn Simulation, bubbles:
     bubbles.render(buf, inner, env.light_level);
 
     // Render creatures from the ECS world
+    let color_fn: fn(u8) -> Color = theme.creature_color_override().unwrap_or(creature_color);
     let world = sim.world();
     for (pos, appearance, anim) in &mut world.query::<(&Position, &Appearance, &AnimationState)>() {
-        render_creature(buf, inner, pos, appearance, anim);
+        render_creature(buf, inner, pos, appearance, anim, color_fn);
     }
 }
 
@@ -118,6 +119,7 @@ fn render_creature(
     pos: &Position,
     appearance: &Appearance,
     anim: &AnimationState,
+    color_fn: fn(u8) -> Color,
 ) {
     let action_idx = anim.current_action as usize;
     let frame_set = match appearance.frame_sets.get(action_idx) {
@@ -153,7 +155,7 @@ fn render_creature(
                 // Inherit the background from the water/substrate already painted
                 let bg = cell.bg;
                 cell.set_char(ch)
-                    .set_style(Style::default().fg(creature_color(appearance.color_index)).bg(bg));
+                    .set_style(Style::default().fg(color_fn(appearance.color_index)).bg(bg));
             }
         }
     }

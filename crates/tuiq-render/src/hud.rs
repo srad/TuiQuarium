@@ -321,7 +321,7 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  t", key_style),
-            Span::styled("       Cycle rendering theme (Classic / Ocean)", desc),
+            Span::styled("       Cycle rendering theme", desc),
         ]),
         Line::from(vec![
             Span::styled("  ?/h", key_style),

@@ -53,6 +53,18 @@ pub enum RenderTheme {
     Classic,
     /// Ocean look — colored backgrounds (blue water, brown substrate).
     Ocean,
+    /// Deep sea — near-black water, bioluminescent neon creatures.
+    DeepSea,
+    /// Coral reef — warm turquoise water, coral-sand substrate.
+    CoralReef,
+    /// Brackish — murky green-brown water, dark mud substrate.
+    Brackish,
+    /// Retro CRT — green phosphor on black, all entities in shades of green.
+    RetroCrt,
+    /// Blueprint — white/cyan on dark blue, technical schematic feel.
+    Blueprint,
+    /// Frozen — pale icy blue water, white substrate.
+    Frozen,
 }
 
 impl RenderTheme {
@@ -60,7 +72,13 @@ impl RenderTheme {
     pub fn next(self) -> Self {
         match self {
             Self::Classic => Self::Ocean,
-            Self::Ocean => Self::Classic,
+            Self::Ocean => Self::DeepSea,
+            Self::DeepSea => Self::CoralReef,
+            Self::CoralReef => Self::Brackish,
+            Self::Brackish => Self::RetroCrt,
+            Self::RetroCrt => Self::Blueprint,
+            Self::Blueprint => Self::Frozen,
+            Self::Frozen => Self::Classic,
         }
     }
 
@@ -68,7 +86,48 @@ impl RenderTheme {
         match self {
             Self::Classic => "Classic",
             Self::Ocean => "Ocean",
+            Self::DeepSea => "Deep Sea",
+            Self::CoralReef => "Coral Reef",
+            Self::Brackish => "Brackish",
+            Self::RetroCrt => "Retro CRT",
+            Self::Blueprint => "Blueprint",
+            Self::Frozen => "Frozen",
         }
+    }
+
+    /// Whether this theme overrides creature colors (monochrome themes).
+    pub fn creature_color_override(self) -> Option<fn(u8) -> ratatui::style::Color> {
+        match self {
+            Self::RetroCrt => Some(creature_color_retro),
+            Self::Blueprint => Some(creature_color_blueprint),
+            _ => None,
+        }
+    }
+}
+
+use ratatui::style::Color;
+
+fn creature_color_retro(color_index: u8) -> Color {
+    // Shades of green phosphor
+    match color_index % 6 {
+        0 => Color::Rgb(0, 255, 0),
+        1 => Color::Rgb(0, 200, 0),
+        2 => Color::Rgb(0, 160, 0),
+        3 => Color::Rgb(80, 255, 80),
+        4 => Color::Rgb(0, 220, 50),
+        _ => Color::Rgb(40, 180, 40),
+    }
+}
+
+fn creature_color_blueprint(color_index: u8) -> Color {
+    // Shades of white/cyan on blue
+    match color_index % 6 {
+        0 => Color::White,
+        1 => Color::Rgb(180, 220, 255),
+        2 => Color::Rgb(140, 200, 255),
+        3 => Color::LightCyan,
+        4 => Color::Rgb(200, 230, 255),
+        _ => Color::Rgb(160, 210, 255),
     }
 }
 
