@@ -6,7 +6,7 @@ license = "BUSL-1.1"
 
 [dependencies]
 tuiq-core = { path = "../tuiq-core" }
-ratatui = "0.29"
+ratatui = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
 fontdue = "0.9"
 gif = "0.13"

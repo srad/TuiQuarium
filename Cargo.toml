@@ -11,4 +11,9 @@ license = "BUSL-1.1"
 tuiq-core = { path = "crates/tuiq-core" }
 tuiq-render = { path = "crates/tuiq-render" }
 crossterm = "0.28"
-ratatui = "0.29"
+hecs = "0.11"
+ratatui = "0.30"
+pollster = "0.4"
+ratatui-wgpu = { path = "../ratatui-wgpu" }
+rustybuzz = "0.20.1"
+winit = "0.30"

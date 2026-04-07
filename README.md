@@ -112,6 +112,18 @@ cd tuiquarium
 cargo run --release
 ```
 
+For a fixed-size cross-platform window frontend backed by `ratatui-wgpu`:
+
+```bash
+cargo run --release -- --frontend gpu
+```
+
+The GPU frontend uses the bundled JetBrains Mono font and keeps the aquarium at a
+fixed `136x44` simulation size instead of stretching the tank to the host terminal
+dimensions. Resizing the window changes the visual font scale and viewport so the
+same simulation fills the window like the terminal layout, with black background
+gutter only for leftover pixels that do not fit a full text cell.
+
 The default visible run starts directly from a simple aquatic founder web:
 
 - low-biomass producer colonies

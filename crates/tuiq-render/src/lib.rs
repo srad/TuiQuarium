@@ -131,6 +131,17 @@ fn creature_color_blueprint(color_index: u8) -> Color {
     }
 }
 
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
+}
+
 /// The main TUI renderer using ratatui.
 pub struct TuiRenderer {
     bubbles: BubbleSystem,
@@ -171,17 +182,20 @@ impl TuiRenderer {
         // Reserve 3 rows at bottom for the default HUD, or 9 rows when the
         // diagnostics overlay is active.
         let footer_rows = if display.show_diagnostics { 9 } else { 3 };
+        let tank_width = tw.saturating_add(2);
+        let tank_height = th.saturating_add(2);
+        let content_area = centered_rect(area, tank_width, tank_height.saturating_add(footer_rows));
         let tank_area = Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(footer_rows),
+            content_area.x,
+            content_area.y,
+            content_area.width,
+            tank_height.min(content_area.height.saturating_sub(footer_rows)),
         );
         let hud_area = Rect::new(
-            area.x,
-            area.y + tank_area.height,
-            area.width,
-            footer_rows.min(area.height),
+            content_area.x,
+            content_area.y + tank_area.height,
+            content_area.width,
+            content_area.height.saturating_sub(tank_area.height),
         );
 
         tank::render_tank(frame, tank_area, sim, &self.bubbles, display.theme);
@@ -298,6 +312,18 @@ mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
     use tuiq_core::AquariumSim;
+
+    #[test]
+    fn test_centered_rect_uses_requested_size_when_space_allows() {
+        let rect = centered_rect(Rect::new(0, 0, 120, 50), 98, 37);
+        assert_eq!(rect, Rect::new(11, 6, 98, 37));
+    }
+
+    #[test]
+    fn test_centered_rect_clamps_to_available_space() {
+        let rect = centered_rect(Rect::new(4, 2, 40, 10), 98, 37);
+        assert_eq!(rect, Rect::new(4, 2, 40, 10));
+    }
 
     #[test]
     fn test_render_with_diagnostics_does_not_panic_on_small_viewport() {
