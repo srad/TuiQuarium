@@ -20,8 +20,9 @@ use crate::{
 };
 
 const WINDOW_TITLE: &str = concat!("TuiQuarium ", env!("CARGO_PKG_VERSION"));
+const WINDOW_FONT_NAME: &str = "Cascadia Mono";
 const WINDOW_FONT_DATA: &[u8] =
-    include_bytes!("../crates/tuiq-render/fonts/JetBrainsMono-Regular.ttf");
+    include_bytes!("../crates/tuiq-render/fonts/CascadiaMono.ttf");
 const WGPU_TARGET_COLUMNS: u16 = FIXED_TANK_WIDTH + 2;
 const WGPU_BASE_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + 3;
 const WGPU_DIAGNOSTIC_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + MAX_DIAGNOSTIC_HUD_ROWS;
@@ -52,8 +53,8 @@ struct WgpuApp {
 
 impl WgpuApp {
     fn new() -> Result<Self, Box<dyn Error>> {
-        let font =
-            Font::new(WINDOW_FONT_DATA).ok_or("bundled JetBrains Mono font could not be parsed")?;
+        let font = Font::new(WINDOW_FONT_DATA)
+            .ok_or_else(|| format!("bundled {WINDOW_FONT_NAME} font could not be parsed"))?;
         Ok(Self {
             window: None,
             terminal: None,
@@ -328,13 +329,13 @@ struct WindowFontMetrics {
 impl WindowFontMetrics {
     fn from_bytes(data: &[u8]) -> Result<Self, Box<dyn Error>> {
         let face = Face::from_slice(data, 0)
-            .ok_or("bundled JetBrains Mono metrics could not be parsed")?;
+            .ok_or_else(|| format!("bundled {WINDOW_FONT_NAME} metrics could not be parsed"))?;
         let advance_units = face
             .glyph_hor_advance(face.glyph_index('m').unwrap_or_default())
             .unwrap_or_default() as f32;
         let height_units = face.height() as f32;
         if advance_units <= 0.0 || height_units <= 0.0 {
-            return Err("bundled JetBrains Mono returned invalid metrics".into());
+            return Err(format!("bundled {WINDOW_FONT_NAME} returned invalid metrics").into());
         }
         Ok(Self {
             advance_units,

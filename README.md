@@ -119,7 +119,7 @@ For a fixed-size cross-platform window frontend backed by `ratatui-wgpu`:
 cargo run --release -- --frontend gpu
 ```
 
-The GPU frontend uses the bundled JetBrains Mono font and keeps the shallow-lake
+The GPU frontend uses the bundled Cascadia Mono font and keeps the shallow-lake
 view at a fixed `136x44` simulation size instead of stretching the tank to the
 host window. Resizing changes the visual font scale, while any leftover space
 stays black so the visible lake layout matches the terminal presentation.
