@@ -23,11 +23,9 @@ const SIM_SPEED_STEP: f32 = 0.5;
 const FIXED_TANK_WIDTH: u16 = 136;
 const FIXED_TANK_HEIGHT: u16 = 44;
 const MAX_DIAGNOSTIC_HUD_ROWS: u16 = 9;
-const MIN_WINDOW_FONT_SIZE_PX: u32 = 8;
+const MIN_WINDOW_FONT_SIZE_PX: u32 = 4;
 const DEFAULT_WINDOW_WIDTH_PX: f64 = 1440.0;
 const DEFAULT_WINDOW_HEIGHT_PX: f64 = 960.0;
-const MIN_WINDOW_WIDTH_PX: f64 = 1280.0;
-const MIN_WINDOW_HEIGHT_PX: f64 = 840.0;
 
 fn main() -> Result<(), Box<dyn Error>> {
     match parse_args()? {

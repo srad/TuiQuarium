@@ -121,8 +121,11 @@ cargo run --release -- --frontend gpu
 
 The GPU frontend uses the bundled Cascadia Mono font and keeps the shallow-lake
 view at a fixed `136x44` simulation size instead of stretching the tank to the
-host window. Resizing changes the visual font scale, while any leftover space
-stays black so the visible lake layout matches the terminal presentation.
+host window. Resizing changes the visual font scale, there is no app-imposed
+large minimum window size, and redraw is deferred while you are actively
+drag-resizing so the lake keeps fitting without the window stalling. Any
+leftover space stays black so the visible lake layout matches the terminal
+presentation.
 
 The default visible run starts directly from a shallow-lake founder web:
 

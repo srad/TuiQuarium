@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use pollster::block_on;
 use ratatui::{style::Color, Terminal};
@@ -15,8 +16,7 @@ use winit::window::{Window, WindowAttributes};
 
 use crate::{
     AppAction, AppState, DEFAULT_WINDOW_HEIGHT_PX, DEFAULT_WINDOW_WIDTH_PX, FIXED_TANK_HEIGHT,
-    FIXED_TANK_WIDTH, MAX_DIAGNOSTIC_HUD_ROWS, MIN_WINDOW_FONT_SIZE_PX, MIN_WINDOW_HEIGHT_PX,
-    MIN_WINDOW_WIDTH_PX,
+    FIXED_TANK_WIDTH, MAX_DIAGNOSTIC_HUD_ROWS, MIN_WINDOW_FONT_SIZE_PX,
 };
 
 const WINDOW_TITLE: &str = concat!("TuiQuarium ", env!("CARGO_PKG_VERSION"));
@@ -26,6 +26,7 @@ const WINDOW_FONT_DATA: &[u8] =
 const WGPU_TARGET_COLUMNS: u16 = FIXED_TANK_WIDTH + 2;
 const WGPU_BASE_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + 3;
 const WGPU_DIAGNOSTIC_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + MAX_DIAGNOSTIC_HUD_ROWS;
+const RESIZE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 
 type WindowTerminal = Terminal<WgpuBackend<'static, 'static>>;
 
@@ -49,6 +50,33 @@ struct WgpuApp {
     font: Font<'static>,
     font_metrics: WindowFontMetrics,
     layout: Option<TerminalLayoutConfig>,
+    resize: ResizeDebounce,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ResizeDebounce {
+    pending_size: Option<(u32, u32)>,
+    settle_deadline: Option<Instant>,
+}
+
+impl ResizeDebounce {
+    fn begin(&mut self, width: u32, height: u32, now: Instant) {
+        self.pending_size = Some((width, height));
+        self.settle_deadline = Some(now + RESIZE_SETTLE_DELAY);
+    }
+
+    fn is_active(self, now: Instant) -> bool {
+        self.settle_deadline.is_some_and(|deadline| now < deadline)
+    }
+
+    fn take_settled(&mut self, now: Instant) -> Option<(u32, u32)> {
+        if self.is_active(now) {
+            return None;
+        }
+
+        self.settle_deadline = None;
+        self.pending_size.take()
+    }
 }
 
 impl WgpuApp {
@@ -63,6 +91,7 @@ impl WgpuApp {
             font: font.clone(),
             font_metrics: WindowFontMetrics::from_bytes(WINDOW_FONT_DATA)?,
             layout: None,
+            resize: ResizeDebounce::default(),
         })
     }
 
@@ -87,10 +116,6 @@ impl WgpuApp {
                     .with_inner_size(LogicalSize::new(
                         DEFAULT_WINDOW_WIDTH_PX,
                         DEFAULT_WINDOW_HEIGHT_PX,
-                    ))
-                    .with_min_inner_size(LogicalSize::new(
-                        MIN_WINDOW_WIDTH_PX,
-                        MIN_WINDOW_HEIGHT_PX,
                     )),
             )?,
         );
@@ -100,19 +125,23 @@ impl WgpuApp {
         Ok(())
     }
 
-    fn sync_terminal_layout(&mut self, event_loop: &ActiveEventLoop) {
+    fn apply_terminal_layout(
+        &mut self,
+        width: u32,
+        height: u32,
+        event_loop: &ActiveEventLoop,
+    ) {
         let Some(window) = self.window.clone() else {
             return;
         };
-        let size = window.inner_size();
-        if size.width == 0 || size.height == 0 {
+        if width == 0 || height == 0 {
             return;
         }
 
         let display = self.state.display_state();
         let desired =
             self.font_metrics
-                .layout_for_window(size.width, size.height, display.show_diagnostics);
+                .layout_for_window(width, height, display.show_diagnostics);
 
         if self.layout == Some(desired) {
             return;
@@ -129,8 +158,19 @@ impl WgpuApp {
         }
     }
 
+    fn sync_terminal_layout(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let size = window.inner_size();
+        self.apply_terminal_layout(size.width, size.height, event_loop);
+    }
+
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
-        self.sync_terminal_layout(event_loop);
+        if self.resize.is_active(Instant::now()) {
+            return;
+        }
+
         let Some(terminal) = self.terminal.as_mut() else {
             return;
         };
@@ -139,28 +179,22 @@ impl WgpuApp {
             self.set_error_and_exit(event_loop, format!("wgpu draw failed: {err}"));
             return;
         }
-        self.state.advance();
-
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
     }
 
-    fn resize(&mut self, width: u32, height: u32, event_loop: &ActiveEventLoop) {
+    fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
-        self.sync_terminal_layout(event_loop);
-
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.resize.begin(width, height, Instant::now());
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: &Key) {
         if let Some(action) = action_from_key(key) {
             match self.state.apply_action(action) {
                 Ok(should_quit) => {
+                    if action == AppAction::ToggleDiagnostics {
+                        self.layout = None;
+                    }
                     if should_quit {
                         event_loop.exit();
                     }
@@ -196,7 +230,7 @@ impl ApplicationHandler for WgpuApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
-                self.resize(size.width, size.height, event_loop);
+                self.resize(size.width, size.height);
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
@@ -216,7 +250,20 @@ impl ApplicationHandler for WgpuApp {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.state.advance();
+
+        let now = Instant::now();
+        if self.resize.is_active(now) {
+            return;
+        }
+
+        if let Some((width, height)) = self.resize.take_settled(now) {
+            self.apply_terminal_layout(width, height, event_loop);
+        } else if self.layout.is_none() {
+            self.sync_terminal_layout(event_loop);
+        }
+
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -347,7 +394,13 @@ impl WindowFontMetrics {
         ((self.advance_units * font_size_px as f32 / self.height_units) as u32).max(1)
     }
 
-    fn logical_size_for_font(self, width_px: u32, height_px: u32, font_size_px: u32) -> (u32, u32) {
+    #[cfg(test)]
+    fn logical_size_for_font(
+        self,
+        width_px: u32,
+        height_px: u32,
+        font_size_px: u32,
+    ) -> (u32, u32) {
         let font_size_px = font_size_px.max(1);
         (
             width_px / self.char_width_px(font_size_px),
@@ -459,6 +512,38 @@ mod tests {
             metrics.max_fitting_font_size(100, 50, WGPU_DIAGNOSTIC_ROWS),
             MIN_WINDOW_FONT_SIZE_PX
         );
+    }
+
+    #[test]
+    fn test_resize_debounce_delays_application_until_settled() {
+        let mut resize = ResizeDebounce::default();
+        let start = Instant::now();
+        resize.begin(1000, 700, start);
+
+        assert!(resize.is_active(start + Duration::from_millis(60)));
+        assert_eq!(resize.take_settled(start + Duration::from_millis(60)), None);
+        assert_eq!(
+            resize.take_settled(start + Duration::from_millis(120)),
+            Some((1000, 700))
+        );
+    }
+
+    #[test]
+    fn test_resize_debounce_only_applies_latest_size() {
+        let mut resize = ResizeDebounce::default();
+        let start = Instant::now();
+        resize.begin(1000, 700, start);
+        resize.begin(900, 640, start + Duration::from_millis(40));
+
+        assert_eq!(
+            resize.take_settled(start + Duration::from_millis(159)),
+            None
+        );
+        assert_eq!(
+            resize.take_settled(start + Duration::from_millis(160)),
+            Some((900, 640))
+        );
+        assert_eq!(resize.take_settled(start + Duration::from_millis(200)), None);
     }
 
     #[test]
