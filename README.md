@@ -1,13 +1,13 @@
 <h1 align="center">tuiquarium</h1>
 
 <p align="center">
-  <strong>An evolving ASCII aquarium in your terminal.</strong>
+  <strong>An evolving ASCII shallow-lake simulation for terminal and GPU frontends.</strong>
 </p>
 
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-BUSL--1.1-blue.svg" alt="License: BUSL-1.1"></a>
-  <img src="https://img.shields.io/badge/Tests-258_passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-Regression%20suite-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/Status-Alpha-yellow" alt="Status">
 </p>
@@ -24,6 +24,13 @@
 ![tuiquarium_1774917579](https://github.com/user-attachments/assets/983a8bdf-0d2f-4ebc-ac11-ff82f77d5c7d)
 
 ---
+
+## Current State
+
+- **Ecology** &mdash; the default run is a shallow-lake founder web with rooted macrophytes, suspended phytoplankton, detritus recycling, and evolving consumer lineages
+- **Frontends** &mdash; both the original terminal frontend and a GPU-backed `ratatui-wgpu` window frontend are available
+- **Persistence** &mdash; the app starts in a session menu and supports versioned JSON save/load plus per-session archived ecology CSV export
+- **Calibration** &mdash; the simulation now has a reduced equilibrium reference model and regression tests that compare archived run history against a modeled clear-water realism basin
 
 ## Features
 
@@ -78,7 +85,7 @@
 - **Procedural producer ASCII art** &mdash; 4 complexity tiers (speck, tuft, mat, plume) selected by raw genome complexity; producer size within each tier scales with lifecycle stage
 - **Reserve-cost producer reproduction** &mdash; mature rooted macrophytes invest reserve surplus into broadcast propagules and fragments; establishment depends on benthic light, substrate, and local crowding
 - **No artificial food rain** &mdash; the ecosystem sustains itself entirely through producer photosynthesis; manual food drops still available via `f` key
-- **Nutrient cycling** &mdash; dead creatures become detritus entities, macrophyte turnover returns N and P to dissolved/sediment pools, and the phytoplankton pool contributes both shading and pelagic primary production; nitrogen fixation prevents irreversible N-depletion and a nutrient floor (5% of initial) ensures the ecosystem can always recover
+- **Nutrient cycling** &mdash; dead creatures become detritus entities, macrophyte turnover returns N and P to dissolved/sediment pools, and the phytoplankton pool contributes both shading and pelagic primary production; nitrogen fixation, soft external loading, and sediment remineralization keep the lake recoverable without relying on a hard dissolved-nutrient floor
 - **Substrate zones** &mdash; procedurally generated Sandy/Rocky/Planted substrate affects producer establishment; rocky zones favor high-hardiness producers, planted zones boost clonal spread
 - **Continuous depth/light attenuation** &mdash; underwater light declines smoothly with depth and water clarity rather than via three hard depth bands
 - **Night metabolism stress** &mdash; creatures burn 30% more energy at night, favoring complex creatures with metabolism efficiency bonuses
@@ -93,10 +100,14 @@
 - **Day/night cycle** &mdash; sine-based lighting, palette shifts from bright day through dusk to dark night
 - **Random events** &mdash; algae blooms, feeding frenzies, cold snaps (&minus;10°C), earthquakes (every ~60s)
 - **Multi-threaded** &mdash; brain, boids, and hunting systems parallelized with rayon
-- **Soft population cap** &mdash; reproduction suppressed above 600 creatures to maintain responsiveness
+- **Startup menu and session persistence** &mdash; launch into a simple menu with New / Continue Latest / Load / Quit; saves are versioned JSON sessions and `s` also refreshes a per-session ecology CSV
+- **GPU frontend** &mdash; optional `ratatui-wgpu` window mode with bundled Cascadia Mono, fixed `136x44` lake framing, resize-aware font scaling, and deferred redraw while drag-resizing
+- **Soft population cap** &mdash; reproduction is suppressed above a tank-size-scaled carrying-capacity threshold to keep the lake responsive and avoid runaway swarms
 - **HUD overlay** &mdash; population, generation, complexity, species count, diversity coefficient, split creature/producer birth-death counters, day, time, temperature, light, speed, plus a toggleable ecology diagnostics panel and a help popup (`?`) explaining all abbreviations
 - **PNG screenshots &amp; GIF recording** &mdash; `p` saves a full-resolution PNG; `g` toggles streaming GIF recording at configurable resolution and frame rate (see `constants.rs`), ideal for creating evolution time-lapses
-- **Single founder-web startup** &mdash; the visible run starts from low-biomass rooted macrophytes, a standing phytoplankton pool, and simple consumer founders, with no hidden warmup
+- **Single founder-web startup** &mdash; the visible run starts from low-density rooted macrophytes, a standing phytoplankton pool, and simple consumer founders, with no hidden warmup or restocking
+- **Ecological equilibrium reference model** &mdash; [docs/ecology-equilibrium-model.md](docs/ecology-equilibrium-model.md) defines a reduced mathematical source of truth for stable lake regimes, nutrient balance, and calibration targets
+- **Archived ecology history** &mdash; daily producer/consumer/nutrient history is stored in saves and can be exported as CSV for external analysis
 
 ## Quick Start
 
@@ -112,6 +123,9 @@ git clone https://github.com/srad/tuiquarium.git
 cd tuiquarium
 cargo run --release
 ```
+
+On startup, the app now opens a simple session menu where you can start a new
+simulation, continue the latest save, load a saved session, or quit.
 
 For a fixed-size cross-platform window frontend backed by `ratatui-wgpu`:
 
@@ -137,13 +151,14 @@ The default visible run starts directly from a shallow-lake founder web:
 ### Run Tests
 
 ```bash
-cargo test --workspace    # 258 passing tests (235 core + 21 render + 2 app)
+cargo test --workspace    # full core + render + app regression suite
 ```
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
+| `Enter` | Confirm startup menu / load selection |
 | `q` / `Esc` | Quit |
 | `Space` | Pause / Resume |
 | `→` | Speed up (0.5x increments, max 100x) |
@@ -156,6 +171,8 @@ cargo test --workspace    # 258 passing tests (235 core + 21 render + 2 app)
 | `t` | Cycle rendering theme (Ocean, Deep Sea, Coral Reef, Brackish, Retro CRT, Blueprint, Frozen, Classic) |
 | `?` / `h` | Toggle help popup (explains all HUD abbreviations) |
 | `p` | Save PNG screenshot to `~/.tuiquarium/screenshots/` |
+| `s` | Save session to `~/.tuiquarium/saves/` and refresh the per-session CSV in `~/.tuiquarium/analysis/` |
+| `e` | Re-export archived daily ecology history CSV to `~/.tuiquarium/analysis/` |
 | `g` | Toggle GIF recording (output to `~/.tuiquarium/recordings/`) |
 
 ## Architecture
@@ -164,7 +181,9 @@ tuiquarium strictly separates simulation from rendering through traits and depen
 
 ```
 tuiquarium/
-├── src/main.rs               # Entry point, TUI event loop
+├── src/main.rs               # App shell, startup menu, shared terminal frontend
+├── src/session_persistence.rs # Session save/load + archived history CSV export
+├── src/wgpu_frontend.rs      # GPU window frontend built on ratatui-wgpu
 ├── crates/
 │   ├── tuiq-core/            # Pure simulation logic (zero rendering deps)
 │   │   ├── animation.rs      # Frame sequencing & timing
@@ -174,6 +193,7 @@ tuiquarium/
 │   │   ├── brain.rs          # NEAT neural network brains (rayon-parallelized)
 │   │   ├── calibration.rs    # Runtime calibration parameters
 │   │   ├── components.rs     # ECS components (Position, Velocity, Appearance, ...)
+│   │   ├── ecology_equilibrium.rs # Reduced equilibrium model + realism-band tests
 │   │   ├── ecosystem.rs      # Energy, metabolism, grazing/hunting, death
 │   │   ├── environment.rs    # Day/night cycle, temperature, currents, events, substrate zones
 │   │   ├── genetics.rs       # Crossover, mutation, genomic distance
@@ -185,9 +205,10 @@ tuiquarium/
 │   │   ├── physics.rs        # Position integration, boundary handling
 │   │   ├── producer_lifecycle.rs  # Producer genome → procedural ASCII art, lifecycle stages
 │   │   ├── producer_reproduction.rs # Producer broadcast & clonal propagation
+│   │   ├── save.rs           # Versioned simulation snapshot format
 │   │   ├── spatial.rs        # Spatial hash grid with distance-filtered queries
 │   │   ├── spawner.rs        # Asexual/sexual reproduction system
-│   │   ├── stats.rs          # SimStats, EcologyInstant, EcologyDiagnostics
+│   │   ├── stats.rs          # SimStats, ecology diagnostics, archived daily history
 │   │   └── systems.rs        # Trait abstractions: BrainSystem, EcosystemSystem, HuntingSystem, ReproductionSystem, ProducerLifecycleSystem
 │   │
 │   └── tuiq-render/          # Ratatui rendering (depends on tuiq-core)
@@ -546,9 +567,17 @@ Optimized for 600+ creatures at 20 ticks/sec:
 
 ## Roadmap
 
-- [ ] Save/load simulation state (serde serialization)
 - [ ] Terminal resize handling
-- [ ] Configuration file for simulation parameters
+- [ ] Configuration file for simulation and frontend parameters
+- [ ] Built-in analysis views or diagrams for archived ecology history
+
+### Equilibrium Model Integration
+
+- [ ] Derive initial dissolved/sediment nutrients and phytoplankton defaults from solved equilibrium targets instead of ad hoc startup values
+- [ ] Derive founder-web producer and consumer biomass targets from the reduced equilibrium model
+- [ ] Record or infer clearer grazer / detritivore / predator guild observables so archived history can be compared against reduced-model guild structure directly
+- [ ] Add solver-backed alternative regimes beyond the default clear-water lake, such as mixed and turbid states
+- [ ] Export solved equilibrium parameter sets and reference observables for repeatable calibration workflows
 
 ### Optional Ecosystem Improvements
 
