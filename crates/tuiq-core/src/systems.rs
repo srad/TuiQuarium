@@ -6,7 +6,10 @@
 
 use crate::brain;
 use crate::calibration::{EcologyCalibration, EvolutionCalibration};
-use crate::ecosystem::{self, DeathResult, FeedingSummary, LightField, MetabolismFlux, NutrientPool, ProducerEcologyFlux};
+use crate::ecosystem::{
+    self, DeathResult, FeedingSummary, LightField, MetabolismFlux, NutrientPool,
+    ProducerEcologyFlux,
+};
 use crate::environment::Environment;
 use crate::pheromone::PheromoneGrid;
 use crate::spatial::SpatialGrid;
@@ -50,7 +53,16 @@ impl BrainSystem for NeatBrainSystem {
         tank_w: f32,
         tank_h: f32,
     ) -> Vec<(f32, f32, f32)> {
-        brain::brain_system(world, grid, entity_map, env, pheromone_grid, dt, tank_w, tank_h)
+        brain::brain_system(
+            world,
+            grid,
+            entity_map,
+            env,
+            pheromone_grid,
+            dt,
+            tank_w,
+            tank_h,
+        )
     }
 }
 
@@ -117,7 +129,15 @@ impl EcosystemSystem for AllometricEcosystem {
         nutrients: &mut NutrientPool,
         calibration: &EcologyCalibration,
     ) -> ProducerEcologyFlux {
-        ecosystem::producer_ecology_system(world, dt, env, tank_height, light_field, nutrients, calibration)
+        ecosystem::producer_ecology_system(
+            world,
+            dt,
+            env,
+            tank_height,
+            light_field,
+            nutrients,
+            calibration,
+        )
     }
 
     fn tick_aging(&self, world: &mut hecs::World) {
@@ -202,7 +222,17 @@ impl ReproductionSystem for DefaultReproduction {
         evolution: &EvolutionCalibration,
         diversity_coefficient: f32,
     ) -> Vec<hecs::Entity> {
-        spawner::reproduction_system(world, grid, rng, tank_w, tank_h, creature_count, tracker, evolution, diversity_coefficient)
+        spawner::reproduction_system(
+            world,
+            grid,
+            rng,
+            tank_w,
+            tank_h,
+            creature_count,
+            tracker,
+            evolution,
+            diversity_coefficient,
+        )
     }
 }
 

@@ -23,8 +23,7 @@ pub fn save_buffer_as_png(buffer: &Buffer, path: &Path) -> Result<(), Box<dyn st
     let line_metrics = font
         .horizontal_line_metrics(SCREENSHOT_FONT_SIZE)
         .ok_or("font has no horizontal line metrics")?;
-    let cell_h = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap)
-        .ceil() as u32;
+    let cell_h = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil() as u32;
     let baseline = line_metrics.ascent;
 
     let area = buffer.area;

@@ -45,8 +45,8 @@ impl super::AquariumSim {
             let anchor = &producer_positions[self.rng.random_range(0..producer_positions.len())];
             let x = (anchor.x + self.rng.random_range(-1.5..1.5))
                 .clamp(2.0, self.tank_width as f32 - 2.0);
-            let y = (anchor.y + self.rng.random_range(-1.0..1.0))
-                .clamp(2.0, self.tank_height as f32 - 2.0);
+            let y = (self.rooted_settlement_y() + self.rng.random_range(-1.0..0.4))
+                .clamp(self.tank_height as f32 - 4.0, self.tank_height as f32 - 2.0);
             self.spawn_detritus(x, y, DETRITUS_PACKET_ENERGY);
             self.pending_labile_detritus_energy =
                 (self.pending_labile_detritus_energy - DETRITUS_PACKET_ENERGY).max(0.0);
@@ -54,7 +54,13 @@ impl super::AquariumSim {
         self.pending_labile_detritus_energy = self.pending_labile_detritus_energy.min(12.0);
     }
 
-    pub(crate) fn producer_establishment_chance(&self, x: f32, y: f32, kind: ProducerOrigin, hardiness: f32) -> f32 {
+    pub(crate) fn producer_establishment_chance(
+        &self,
+        x: f32,
+        y: f32,
+        kind: ProducerOrigin,
+        hardiness: f32,
+    ) -> f32 {
         let local_light = self.light_field.sample_light(
             x,
             y,
@@ -96,17 +102,19 @@ impl super::AquariumSim {
             ProducerOrigin::Broadcast => 1.0 / (1.0 + patch_crowding * 0.20),
             ProducerOrigin::Fragment => 1.0 / (1.0 + patch_crowding * 0.32),
         };
-        let depth_fraction = (y / self.tank_height.max(1) as f32).clamp(0.0, 1.0);
-        // Research note: submerged macrophyte establishment falls off sharply
-        // below the productive light band, so recruitment should be penalized
-        // well before the darkest bottom cells.
-        let depth_factor = (1.0 - (depth_fraction - 0.62).max(0.0) * 1.8).clamp(0.20, 1.0);
+        let benthic_light_factor = (0.35 + local_light * 0.70).clamp(0.25, 1.0);
+        let hardiness_factor = (0.86 + hardiness * 0.10).clamp(0.82, 0.96);
 
         // Substrate affects establishment: rocky favors hardy producers, planted
         // zones give a general establishment bonus.
         let substrate_mod = self.substrate.establishment_modifier(x, hardiness);
 
-        (base * (0.28 + local_light * 0.82) * local_open_factor * patch_open_factor * depth_factor * substrate_mod)
+        (base
+            * benthic_light_factor
+            * local_open_factor
+            * patch_open_factor
+            * hardiness_factor
+            * substrate_mod)
             .clamp(0.0, 0.95)
     }
 
@@ -179,6 +187,7 @@ impl super::AquariumSim {
 
         let tw = self.tank_width as f32;
         let th = self.tank_height as f32;
+        let settlement_y = self.rooted_settlement_y();
         let mut parent_updates = Vec::new();
         let mut spawns = Vec::new();
 
@@ -258,10 +267,7 @@ impl super::AquariumSim {
                     child_genome.generation += 1;
                     let mutation_rate = candidate.genome.mutation_rate_factor
                         * 0.12
-                        * self
-                            .calibration
-                            .evolution
-                            .producer_mutation_multiplier
+                        * self.calibration.evolution.producer_mutation_multiplier
                         * self.diversity_coefficient;
                     genetics::mutate_producer(&mut child_genome, mutation_rate, &mut self.rng);
 
@@ -282,10 +288,14 @@ impl super::AquariumSim {
                     let angle = self.rng.random_range(0.0..std::f32::consts::TAU);
                     let new_x = (candidate.x + angle.cos() * distance).clamp(2.0, tw - 2.0);
                     let new_y =
-                        (candidate.y + angle.sin() * distance * 0.45).clamp(th * 0.22, th - 3.0);
+                        (settlement_y + angle.sin() * distance * 0.12).clamp(th - 5.0, th - 3.0);
 
-                    let establishment =
-                        self.producer_establishment_chance(new_x, new_y, ProducerOrigin::Broadcast, candidate.genome.hardiness);
+                    let establishment = self.producer_establishment_chance(
+                        new_x,
+                        new_y,
+                        ProducerOrigin::Broadcast,
+                        candidate.genome.hardiness,
+                    );
                     if self.rng.random_bool(establishment as f64) {
                         spawns.push(SpawnRequest {
                             pos: Position { x: new_x, y: new_y },
@@ -319,10 +329,7 @@ impl super::AquariumSim {
                     child_genome.generation += 1;
                     let mutation_rate = candidate.genome.mutation_rate_factor
                         * 0.04
-                        * self
-                            .calibration
-                            .evolution
-                            .producer_mutation_multiplier
+                        * self.calibration.evolution.producer_mutation_multiplier
                         * self.diversity_coefficient;
                     genetics::mutate_producer(&mut child_genome, mutation_rate, &mut self.rng);
 
@@ -331,10 +338,14 @@ impl super::AquariumSim {
                     let new_x =
                         (candidate.x + self.rng.random_range(-spread..spread)).clamp(2.0, tw - 2.0);
                     let new_y =
-                        (candidate.y + self.rng.random_range(-1.5..1.5)).clamp(th * 0.25, th - 3.0);
+                        (settlement_y + self.rng.random_range(-0.9..0.5)).clamp(th - 5.0, th - 3.0);
 
-                    let establishment =
-                        self.producer_establishment_chance(new_x, new_y, ProducerOrigin::Fragment, candidate.genome.hardiness);
+                    let establishment = self.producer_establishment_chance(
+                        new_x,
+                        new_y,
+                        ProducerOrigin::Fragment,
+                        candidate.genome.hardiness,
+                    );
                     if self.rng.random_bool(establishment as f64) {
                         spawns.push(SpawnRequest {
                             pos: Position { x: new_x, y: new_y },

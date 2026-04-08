@@ -117,7 +117,7 @@ impl Environment {
 
         // Events can modify light
         let light_modifier = match &self.active_event {
-            Some(e) if e.kind == EventKind::AlgaeBloom => 0.6, // reduced visibility
+            Some(e) if e.kind == EventKind::AlgaeBloom => 0.72, // reduced visibility
             _ => 1.0,
         };
         self.light_level = (base_light * light_modifier).clamp(0.05, 1.0);
@@ -126,16 +126,19 @@ impl Environment {
         let temp_variation = hour_angle.sin() * 1.5; // ±1.5°C
         let base_temp = 25.0 + temp_variation;
         self.temperature = match &self.active_event {
-            Some(e) if e.kind == EventKind::ColdSnap => base_temp - 10.0,
+            Some(e) if e.kind == EventKind::ColdSnap => base_temp - 7.0,
             _ => base_temp,
         };
 
         // Water current: slowly rotating vector
         let current_angle = self.sim_time * 0.05; // full rotation every ~125s
-        let current_strength = 0.3;
+        let (current_strength, vertical_strength) = match &self.active_event {
+            Some(e) if e.kind == EventKind::Earthquake => (1.2, 0.65),
+            _ => (0.3, 0.3),
+        };
         self.current = (
             current_angle.cos() * current_strength,
-            current_angle.sin() * current_strength * 0.3, // weaker vertical
+            current_angle.sin() * current_strength * vertical_strength,
         );
 
         // Tick active event
@@ -234,7 +237,9 @@ impl SubstrateGrid {
         // Walk across columns placing zones of varying width.
         let mut x = 0usize;
         // Mix the seed to avoid poor initial state for small seeds
-        let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut state = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         while x < w {
             // xorshift64 for lightweight deterministic randomness
             state ^= state << 13;
@@ -271,8 +276,8 @@ impl SubstrateGrid {
     pub fn establishment_modifier(&self, x: f32, hardiness: f32) -> f32 {
         match self.at(x) {
             Substrate::Sandy => 1.0,
-            Substrate::Rocky => 0.8 + 0.4 * hardiness,   // 0.8–1.2 based on hardiness
-            Substrate::Planted => 1.15,                    // general bonus for established zones
+            Substrate::Rocky => 0.8 + 0.4 * hardiness, // 0.8–1.2 based on hardiness
+            Substrate::Planted => 1.15,                // general bonus for established zones
         }
     }
 

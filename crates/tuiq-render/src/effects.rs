@@ -162,7 +162,8 @@ impl BubbleSystem {
 
             if let Some(cell) = buf.cell_mut((sx as u16, sy as u16)) {
                 let bg = cell.bg;
-                cell.set_char(ch).set_style(Style::default().fg(color).bg(bg));
+                cell.set_char(ch)
+                    .set_style(Style::default().fg(color).bg(bg));
             }
         }
     }

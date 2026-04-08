@@ -60,7 +60,8 @@ pub fn derive_physics(genome: &CreatureGenome) -> DerivedPhysics {
     // with body length. Exponent 0.35 compromises burst (~L^0.5) and sustained
     // (~L^0.43) scaling. Acceleration (line 62) still ∝ 1/mass, preserving
     // the trade-off: large = fast straight-line, small = agile maneuvering.
-    let max_speed = 3.0 * plan_speed_factor * tail_thrust * beh.speed_factor * art.body_size.powf(0.35);
+    let max_speed =
+        3.0 * plan_speed_factor * tail_thrust * beh.speed_factor * art.body_size.powf(0.35);
 
     // Acceleration from rear protrusion
     let acceleration = 8.0 * tail_thrust * beh.speed_factor / body_mass.max(0.1);
@@ -355,10 +356,8 @@ mod tests {
             // With minimal brain (next_node_id=23, 0 hidden), biochem efficiency
             // dominates: ratio ≈ (1.0 - 0.20*0.8) / 1.0 = 0.84
             let hidden = g_complex.brain.next_node_id.saturating_sub(23) as f32;
-            let expected_complex = (1.0 - 0.20 * 0.8)
-                + 0.01 * hidden * (0.5 + 0.5 * 0.8);
-            let expected_simple = 1.0
-                + 0.01 * hidden * 0.5;
+            let expected_complex = (1.0 - 0.20 * 0.8) + 0.01 * hidden * (0.5 + 0.5 * 0.8);
+            let expected_simple = 1.0 + 0.01 * hidden * 0.5;
             let expected_ratio = expected_complex / expected_simple;
 
             let ratio = p_complex.base_metabolism / p_simple.base_metabolism;
@@ -388,14 +387,16 @@ mod tests {
         assert!(
             large.sensory_range > small.sensory_range,
             "Larger creature should see further: large={:.1} vs small={:.1}",
-            large.sensory_range, small.sensory_range,
+            large.sensory_range,
+            small.sensory_range,
         );
         // Caves et al. (2017): cap scales with body size
         let large_cap = 14.0 + 4.0 * 2.5;
         assert!(
             large.sensory_range <= large_cap,
             "Range should respect size-scaled cap {:.1}: got {:.1}",
-            large_cap, large.sensory_range,
+            large_cap,
+            large.sensory_range,
         );
     }
 

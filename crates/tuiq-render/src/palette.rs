@@ -150,7 +150,11 @@ fn deep_sea_palette(env: &Environment) -> Palette {
     let l = env.light_level;
     let dim = (l * 0.3).max(0.05);
     Palette {
-        water_fg: Color::Rgb((10.0 * dim) as u8, (15.0 * dim) as u8, (50.0 + 30.0 * dim) as u8),
+        water_fg: Color::Rgb(
+            (10.0 * dim) as u8,
+            (15.0 * dim) as u8,
+            (50.0 + 30.0 * dim) as u8,
+        ),
         water_bg: Color::Rgb(0, (2.0 * dim) as u8, (8.0 + 4.0 * dim) as u8),
         border: Color::Rgb(20, 30, 80),
         sand: Color::Rgb((40.0 * dim) as u8, (35.0 * dim) as u8, (20.0 * dim) as u8),
@@ -214,10 +218,22 @@ fn blueprint_palette(env: &Environment) -> Palette {
     let title = event_title(env);
     let l = env.light_level.max(0.15);
     Palette {
-        water_fg: Color::Rgb((60.0 * l) as u8, (100.0 * l) as u8, (200.0 * l.min(1.0)) as u8),
+        water_fg: Color::Rgb(
+            (60.0 * l) as u8,
+            (100.0 * l) as u8,
+            (200.0 * l.min(1.0)) as u8,
+        ),
         water_bg: Color::Rgb((5.0 * l) as u8, (10.0 * l) as u8, (30.0 * l) as u8),
-        border: Color::Rgb((120.0 * l) as u8, (160.0 * l) as u8, (220.0 * l.min(1.0)) as u8),
-        sand: Color::Rgb((100.0 * l) as u8, (140.0 * l) as u8, (200.0 * l.min(1.0)) as u8),
+        border: Color::Rgb(
+            (120.0 * l) as u8,
+            (160.0 * l) as u8,
+            (220.0 * l.min(1.0)) as u8,
+        ),
+        sand: Color::Rgb(
+            (100.0 * l) as u8,
+            (140.0 * l) as u8,
+            (200.0 * l.min(1.0)) as u8,
+        ),
         sand_bg: Color::Rgb((8.0 * l) as u8, (15.0 * l) as u8, (40.0 * l) as u8),
         gravel: Color::Rgb((80.0 * l) as u8, (120.0 * l) as u8, (180.0 * l) as u8),
         gravel_bg: Color::Rgb((6.0 * l) as u8, (12.0 * l) as u8, (35.0 * l) as u8),
@@ -230,10 +246,22 @@ fn frozen_palette(env: &Environment) -> Palette {
     let title = event_title(env);
     let l = env.light_level.max(0.15);
     Palette {
-        water_fg: Color::Rgb((120.0 * l) as u8, (160.0 * l) as u8, (200.0 * l.min(1.0)) as u8),
+        water_fg: Color::Rgb(
+            (120.0 * l) as u8,
+            (160.0 * l) as u8,
+            (200.0 * l.min(1.0)) as u8,
+        ),
         water_bg: Color::Rgb((12.0 * l) as u8, (18.0 * l) as u8, (30.0 * l) as u8),
-        border: Color::Rgb((180.0 * l) as u8, (200.0 * l.min(1.0)) as u8, (220.0 * l.min(1.0)) as u8),
-        sand: Color::Rgb((200.0 * l.min(1.0)) as u8, (210.0 * l.min(1.0)) as u8, (220.0 * l.min(1.0)) as u8),
+        border: Color::Rgb(
+            (180.0 * l) as u8,
+            (200.0 * l.min(1.0)) as u8,
+            (220.0 * l.min(1.0)) as u8,
+        ),
+        sand: Color::Rgb(
+            (200.0 * l.min(1.0)) as u8,
+            (210.0 * l.min(1.0)) as u8,
+            (220.0 * l.min(1.0)) as u8,
+        ),
         sand_bg: Color::Rgb((40.0 * l) as u8, (45.0 * l) as u8, (50.0 * l) as u8),
         gravel: Color::Rgb((160.0 * l) as u8, (175.0 * l) as u8, (190.0 * l) as u8),
         gravel_bg: Color::Rgb((30.0 * l) as u8, (35.0 * l) as u8, (40.0 * l) as u8),

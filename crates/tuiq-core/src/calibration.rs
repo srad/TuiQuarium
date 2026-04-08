@@ -36,17 +36,17 @@ impl Default for EcologyCalibration {
     fn default() -> Self {
         Self {
             producers_per_1000_cells: 14.0,
-            min_consumer_founders: 3,
-            max_consumer_founders: 5,
+            min_consumer_founders: 6,
+            max_consumer_founders: 9,
             founder_spacing: 2.6,
-            consumer_biomass_share: 0.035,
-            edible_biomass_bonus: 0.05,
+            consumer_biomass_share: 0.06,
+            edible_biomass_bonus: 0.085,
             producer_growth_multiplier: 1.0,
             producer_maintenance_multiplier: 1.0,
             producer_turnover_multiplier: 1.0,
             producer_nutrient_demand_multiplier: 0.50,
             phytoplankton_shading_multiplier: 1.0,
-            consumer_metabolism_multiplier: 0.50,
+            consumer_metabolism_multiplier: 0.42,
         }
     }
 }

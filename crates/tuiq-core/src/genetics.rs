@@ -98,7 +98,14 @@ pub fn mutate(
     let plan_mass_factor = 0.6 + 0.6 * (1.0 - genome.art.body_elongation);
     let body_mass = genome.art.body_size * genome.art.body_size * plan_mass_factor;
     let effective_cap = brain::effective_max_nodes(body_mass);
-    brain::mutate_brain(&mut genome.brain, rate, diversity, effective_cap, rng, tracker);
+    brain::mutate_brain(
+        &mut genome.brain,
+        rate,
+        diversity,
+        effective_cap,
+        rng,
+        tracker,
+    );
     // Complexity ALWAYS mutates — it's the master gene driving morphological evolution.
     // Gating it behind per-gene rate (~15%) made exploration too slow for complexity
     // to increase meaningfully within simulation timescales.

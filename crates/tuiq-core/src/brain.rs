@@ -180,7 +180,13 @@ impl ActivationFn {
             ActivationFn::ReLU => x.max(0.0),
             ActivationFn::Sigmoid => 1.0 / (1.0 + (-x).exp()),
             ActivationFn::Abs => x.abs(),
-            ActivationFn::Step => if x > 0.0 { 1.0 } else { 0.0 },
+            ActivationFn::Step => {
+                if x > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             ActivationFn::Identity => x,
         }
     }
@@ -601,9 +607,13 @@ impl Brain {
                         ActivationFn::Identity.apply(self_contrib + bias)
                     } else {
                         // Compute softmax over raw weights (attention scores)
-                        let max_w = conns.iter().map(|(_, w)| *w).fold(f32::NEG_INFINITY, f32::max);
+                        let max_w = conns
+                            .iter()
+                            .map(|(_, w)| *w)
+                            .fold(f32::NEG_INFINITY, f32::max);
                         let exp_sum: f32 = conns.iter().map(|(_, w)| (w - max_w).exp()).sum();
-                        let blend: f32 = conns.iter()
+                        let blend: f32 = conns
+                            .iter()
                             .map(|&(src, w)| {
                                 let alpha = (w - max_w).exp() / exp_sum;
                                 alpha * activations[src as usize]
@@ -620,7 +630,11 @@ impl Brain {
                         sum += activations[src as usize] * weight;
                     }
                     let bias = self.biases.get(idx).copied().unwrap_or(0.0);
-                    let act_fn = self.activation_fns.get(idx).copied().unwrap_or(ActivationFn::Tanh);
+                    let act_fn = self
+                        .activation_fns
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(ActivationFn::Tanh);
                     act_fn.apply(sum + bias)
                 }
             };
@@ -1194,9 +1208,17 @@ pub fn crossover_brain(a: &BrainGenome, b: &BrainGenome, rng: &mut impl Rng) -> 
             match (ng_a, ng_b) {
                 (Some(ga), Some(gb)) => {
                     node_genes.push(NodeGene {
-                        activation_fn: if rng.random_bool(0.5) { ga.activation_fn } else { gb.activation_fn },
+                        activation_fn: if rng.random_bool(0.5) {
+                            ga.activation_fn
+                        } else {
+                            gb.activation_fn
+                        },
                         bias: (ga.bias + gb.bias) / 2.0,
-                        role: if rng.random_bool(0.5) { ga.role } else { gb.role },
+                        role: if rng.random_bool(0.5) {
+                            ga.role
+                        } else {
+                            gb.role
+                        },
                         trace_decay: (ga.trace_decay + gb.trace_decay) / 2.0,
                     });
                 }
@@ -1305,13 +1327,11 @@ pub fn mutate_brain(
         if idx < brain.node_genes.len() {
             let new_act = ActivationFn::random(rng);
             brain.node_genes[idx].activation_fn = new_act;
-            let target = new_act.default_trace_decay()
-                + brain.node_genes[idx].role.trace_decay_bonus();
+            let target =
+                new_act.default_trace_decay() + brain.node_genes[idx].role.trace_decay_bonus();
             // Blend 50% toward the new default
-            brain.node_genes[idx].trace_decay =
-                (brain.node_genes[idx].trace_decay + target) / 2.0;
-            brain.node_genes[idx].trace_decay =
-                brain.node_genes[idx].trace_decay.clamp(0.0, 0.99);
+            brain.node_genes[idx].trace_decay = (brain.node_genes[idx].trace_decay + target) / 2.0;
+            brain.node_genes[idx].trace_decay = brain.node_genes[idx].trace_decay.clamp(0.0, 0.99);
         }
     }
 
@@ -1461,7 +1481,9 @@ pub fn mutate_brain(
     }
 
     // 4. Add recurrent self-connection on a hidden or output node
-    if rng.random_bool(ADD_SELF_CONN_RATE * struct_scale) && brain.connections.len() < MAX_CONNECTIONS {
+    if rng.random_bool(ADD_SELF_CONN_RATE * struct_scale)
+        && brain.connections.len() < MAX_CONNECTIONS
+    {
         let existing: HashSet<(u16, u16)> = brain
             .connections
             .iter()
@@ -1578,7 +1600,9 @@ fn duplicate_module(
     let module_conns: Vec<(u16, u16, f32)> = brain
         .connections
         .iter()
-        .filter(|c| c.enabled && module_nodes.contains(&c.in_node) && module_nodes.contains(&c.out_node))
+        .filter(|c| {
+            c.enabled && module_nodes.contains(&c.in_node) && module_nodes.contains(&c.out_node)
+        })
         .map(|c| (c.in_node, c.out_node, c.weight))
         .collect();
 
@@ -1594,19 +1618,27 @@ fn duplicate_module(
         node_map.insert(old_node, new_node);
 
         // Copy depth
-        let depth = brain.node_depths.get(old_node as usize).copied().unwrap_or(0.5);
+        let depth = brain
+            .node_depths
+            .get(old_node as usize)
+            .copied()
+            .unwrap_or(0.5);
         while brain.node_depths.len() <= new_node as usize {
             brain.node_depths.push(0.5);
         }
         brain.node_depths[new_node as usize] = depth;
 
         // Copy node gene with slight perturbation
-        let ng = brain.node_genes.get(old_node as usize).cloned().unwrap_or(NodeGene {
-            activation_fn: ActivationFn::Tanh,
-            bias: 0.0,
-            role: NodeRole::Standard,
-            trace_decay: 0.0,
-        });
+        let ng = brain
+            .node_genes
+            .get(old_node as usize)
+            .cloned()
+            .unwrap_or(NodeGene {
+                activation_fn: ActivationFn::Tanh,
+                bias: 0.0,
+                role: NodeRole::Standard,
+                trace_decay: 0.0,
+            });
         while brain.node_genes.len() <= new_node as usize {
             brain.node_genes.push(NodeGene {
                 activation_fn: ActivationFn::Tanh,
@@ -2131,11 +2163,7 @@ mod tests {
         let input = [0.5f32; INPUT_SIZE];
         let output = brain.forward(&input);
         for &v in &output {
-            assert!(
-                v.is_finite(),
-                "Evolved brain output not finite: {}",
-                v
-            );
+            assert!(v.is_finite(), "Evolved brain output not finite: {}", v);
         }
     }
 
@@ -2479,7 +2507,11 @@ mod tests {
         let mut tracker = InnovationTracker::new();
         let mut genome = BrainGenome::random(&mut rng);
 
-        assert_eq!(genome.num_hidden_nodes(), 0, "should start with no hidden nodes");
+        assert_eq!(
+            genome.num_hidden_nodes(),
+            0,
+            "should start with no hidden nodes"
+        );
 
         // Mutate 100 times — at 8% rate, expect ~8 node additions
         for _ in 0..100 {
@@ -2666,7 +2698,10 @@ mod tests {
         let output = brain.forward(&input);
 
         for &v in &output {
-            assert!(!v.is_nan(), "Output should not be NaN with self-connections");
+            assert!(
+                !v.is_nan(),
+                "Output should not be NaN with self-connections"
+            );
         }
     }
 
@@ -2691,7 +2726,11 @@ mod tests {
         for _ in 0..1000 {
             seen.insert(format!("{:?}", ActivationFn::random(&mut rng)));
         }
-        assert!(seen.len() >= 5, "Random should produce at least 5 of 6 variants, got {:?}", seen);
+        assert!(
+            seen.len() >= 5,
+            "Random should produce at least 5 of 6 variants, got {:?}",
+            seen
+        );
     }
 
     #[test]
@@ -2701,16 +2740,24 @@ mod tests {
 
         // Input nodes should have Identity activation
         for i in 0..INPUT_SIZE {
-            assert_eq!(genome.node_genes[i].activation_fn, ActivationFn::Identity,
-                "Input node {i} should have Identity activation");
-            assert!((genome.node_genes[i].bias).abs() < 1e-6,
-                "Input node {i} should have zero bias");
+            assert_eq!(
+                genome.node_genes[i].activation_fn,
+                ActivationFn::Identity,
+                "Input node {i} should have Identity activation"
+            );
+            assert!(
+                (genome.node_genes[i].bias).abs() < 1e-6,
+                "Input node {i} should have zero bias"
+            );
         }
         // Output nodes should have Tanh activation
         for i in 0..OUTPUT_SIZE {
             let idx = FIRST_OUTPUT as usize + i;
-            assert_eq!(genome.node_genes[idx].activation_fn, ActivationFn::Tanh,
-                "Output node {idx} should have Tanh activation");
+            assert_eq!(
+                genome.node_genes[idx].activation_fn,
+                ActivationFn::Tanh,
+                "Output node {idx} should have Tanh activation"
+            );
         }
     }
 
@@ -2731,9 +2778,15 @@ mod tests {
         let mut brain_relu = Brain::from_genome(&genome);
         let out_relu = brain_relu.forward(&input);
 
-        let diff: f32 = out_tanh.iter().zip(&out_relu).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.001,
-            "Different activation functions should produce different outputs, diff={diff}");
+        let diff: f32 = out_tanh
+            .iter()
+            .zip(&out_relu)
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff > 0.001,
+            "Different activation functions should produce different outputs, diff={diff}"
+        );
     }
 
     #[test]
@@ -2753,9 +2806,12 @@ mod tests {
         let mut brain_bias = Brain::from_genome(&genome);
         let out_bias = brain_bias.forward(&input);
 
-        let diff: f32 = out_no_bias.iter().zip(&out_bias).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.01,
-            "Bias should shift outputs, diff={diff}");
+        let diff: f32 = out_no_bias
+            .iter()
+            .zip(&out_bias)
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(diff > 0.01, "Bias should shift outputs, diff={diff}");
     }
 
     #[test]
@@ -2769,8 +2825,11 @@ mod tests {
         }
 
         for (i, ng) in genome.node_genes.iter().enumerate() {
-            assert!(ng.bias >= -2.0 && ng.bias <= 2.0,
-                "Node {i} bias out of bounds: {}", ng.bias);
+            assert!(
+                ng.bias >= -2.0 && ng.bias <= 2.0,
+                "Node {i} bias out of bounds: {}",
+                ng.bias
+            );
         }
     }
 
@@ -2785,7 +2844,9 @@ mod tests {
             mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
-        let initial_activations: Vec<ActivationFn> = genome.node_genes.iter()
+        let initial_activations: Vec<ActivationFn> = genome
+            .node_genes
+            .iter()
             .map(|ng| ng.activation_fn)
             .collect();
 
@@ -2794,9 +2855,13 @@ mod tests {
             mutate_brain(&mut genome, 0.1, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
-        let changed = genome.node_genes.iter().enumerate()
-            .any(|(i, ng)| i < initial_activations.len() && ng.activation_fn != initial_activations[i]);
-        assert!(changed, "Activation swap mutation should eventually change at least one activation");
+        let changed = genome.node_genes.iter().enumerate().any(|(i, ng)| {
+            i < initial_activations.len() && ng.activation_fn != initial_activations[i]
+        });
+        assert!(
+            changed,
+            "Activation swap mutation should eventually change at least one activation"
+        );
     }
 
     #[test]
@@ -2815,8 +2880,11 @@ mod tests {
         let child = crossover_brain(&a, &b, &mut rng);
 
         // Child should have node_genes for all nodes
-        assert_eq!(child.node_genes.len(), child.next_node_id as usize,
-            "Child should have node_genes for every node");
+        assert_eq!(
+            child.node_genes.len(),
+            child.next_node_id as usize,
+            "Child should have node_genes for every node"
+        );
 
         // Input nodes should still be Identity
         for i in 0..INPUT_SIZE {
@@ -2827,7 +2895,10 @@ mod tests {
         let mut brain = Brain::from_genome(&child);
         let output = brain.forward(&[0.5; INPUT_SIZE]);
         for &v in &output {
-            assert!(!v.is_nan() && v.is_finite(), "Child brain output invalid: {v}");
+            assert!(
+                !v.is_nan() && v.is_finite(),
+                "Child brain output invalid: {v}"
+            );
         }
     }
 
@@ -2845,8 +2916,10 @@ mod tests {
         }
         let dist_diff = brain_distance(&a, &b);
 
-        assert!(dist_diff > dist_same,
-            "Activation differences should increase distance: same={dist_same}, diff={dist_diff}");
+        assert!(
+            dist_diff > dist_same,
+            "Activation differences should increase distance: same={dist_same}, diff={dist_diff}"
+        );
     }
 
     #[test]
@@ -2860,7 +2933,9 @@ mod tests {
             mutate_brain(&mut genome, 0.0, 1.0, MAX_NODES, &mut rng, &mut tracker);
         }
 
-        let has_modulator = genome.node_genes.iter()
+        let has_modulator = genome
+            .node_genes
+            .iter()
             .any(|ng| ng.role == NodeRole::Modulator);
 
         // Even if no modulator yet, run more mutations
@@ -2870,15 +2945,23 @@ mod tests {
             }
         }
 
-        let has_modulator = genome.node_genes.iter()
+        let has_modulator = genome
+            .node_genes
+            .iter()
             .any(|ng| ng.role == NodeRole::Modulator);
-        assert!(has_modulator, "Modulator mutation should eventually create a modulator node");
+        assert!(
+            has_modulator,
+            "Modulator mutation should eventually create a modulator node"
+        );
 
         // Modulator nodes should have Sigmoid activation
         for ng in &genome.node_genes {
             if ng.role == NodeRole::Modulator {
-                assert_eq!(ng.activation_fn, ActivationFn::Sigmoid,
-                    "Modulator nodes should have Sigmoid activation");
+                assert_eq!(
+                    ng.activation_fn,
+                    ActivationFn::Sigmoid,
+                    "Modulator nodes should have Sigmoid activation"
+                );
             }
         }
     }
@@ -2906,7 +2989,10 @@ mod tests {
         for _ in 0..100 {
             let output = brain.forward(&input);
             for &v in &output {
-                assert!(!v.is_nan() && v.is_finite(), "Modulated brain output invalid: {v}");
+                assert!(
+                    !v.is_nan() && v.is_finite(),
+                    "Modulated brain output invalid: {v}"
+                );
             }
         }
     }
@@ -2933,7 +3019,10 @@ mod tests {
         let input = [0.5; INPUT_SIZE];
         let output = brain.forward(&input);
         for &v in &output {
-            assert!(!v.is_nan() && v.is_finite(), "Attention brain output invalid: {v}");
+            assert!(
+                !v.is_nan() && v.is_finite(),
+                "Attention brain output invalid: {v}"
+            );
         }
     }
 
@@ -2955,17 +3044,26 @@ mod tests {
         });
         // Wire input 0 and input 1 into hidden with different weights
         genome.connections.push(ConnectionGene {
-            in_node: 0, out_node: hidden, weight: 0.8,
-            enabled: true, innovation: tracker.get(0, hidden),
+            in_node: 0,
+            out_node: hidden,
+            weight: 0.8,
+            enabled: true,
+            innovation: tracker.get(0, hidden),
         });
         genome.connections.push(ConnectionGene {
-            in_node: 1, out_node: hidden, weight: -0.5,
-            enabled: true, innovation: tracker.get(1, hidden),
+            in_node: 1,
+            out_node: hidden,
+            weight: -0.5,
+            enabled: true,
+            innovation: tracker.get(1, hidden),
         });
         // Wire hidden into output 0
         genome.connections.push(ConnectionGene {
-            in_node: hidden, out_node: FIRST_OUTPUT, weight: 1.0,
-            enabled: true, innovation: tracker.get(hidden, FIRST_OUTPUT),
+            in_node: hidden,
+            out_node: FIRST_OUTPUT,
+            weight: 1.0,
+            enabled: true,
+            innovation: tracker.get(hidden, FIRST_OUTPUT),
         });
 
         // Standard brain
@@ -2980,9 +3078,15 @@ mod tests {
         let mut attn_brain = Brain::from_genome(&genome);
         let out_attn = attn_brain.forward(&input);
 
-        let diff: f32 = out_standard.iter().zip(&out_attn).map(|(a, b)| (a - b).abs()).sum();
-        assert!(diff > 0.0001,
-            "Attention node should produce different output than standard, diff={diff}");
+        let diff: f32 = out_standard
+            .iter()
+            .zip(&out_attn)
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            diff > 0.0001,
+            "Attention node should produce different output than standard, diff={diff}"
+        );
     }
 
     #[test]
@@ -3006,17 +3110,23 @@ mod tests {
             duplicate_module(&mut genome, seed, MAX_NODES, &mut rng, &mut tracker);
         }
 
-        assert!(genome.next_node_id >= nodes_before,
-            "Module dup should not decrease node count");
-        assert!(genome.connections.len() >= conns_before,
-            "Module dup should not decrease connection count");
+        assert!(
+            genome.next_node_id >= nodes_before,
+            "Module dup should not decrease node count"
+        );
+        assert!(
+            genome.connections.len() >= conns_before,
+            "Module dup should not decrease connection count"
+        );
 
         // Verify the duplicated brain still works
         let mut brain = Brain::from_genome(&genome);
         let output = brain.forward(&[0.5; INPUT_SIZE]);
         for &v in &output {
-            assert!(!v.is_nan() && v.is_finite(),
-                "Brain with duplicated module should produce valid output: {v}");
+            assert!(
+                !v.is_nan() && v.is_finite(),
+                "Brain with duplicated module should produce valid output: {v}"
+            );
         }
     }
 
@@ -3033,10 +3143,14 @@ mod tests {
         }
 
         // Verify structural integrity
-        assert!(genome.node_genes.len() >= genome.next_node_id as usize,
-            "node_genes should cover all node IDs");
-        assert!(genome.node_depths.len() >= genome.next_node_id as usize,
-            "node_depths should cover all node IDs");
+        assert!(
+            genome.node_genes.len() >= genome.next_node_id as usize,
+            "node_genes should cover all node IDs"
+        );
+        assert!(
+            genome.node_depths.len() >= genome.next_node_id as usize,
+            "node_depths should cover all node IDs"
+        );
 
         // Verify forward pass works with learning
         let mut brain = Brain::from_genome_with_learning(&genome, 0.1);
@@ -3044,8 +3158,10 @@ mod tests {
         for _ in 0..100 {
             let output = brain.forward(&input);
             for &v in &output {
-                assert!(!v.is_nan() && v.is_finite(),
-                    "Fully evolved brain output should be valid: {v}");
+                assert!(
+                    !v.is_nan() && v.is_finite(),
+                    "Fully evolved brain output should be valid: {v}"
+                );
             }
         }
     }
@@ -3099,11 +3215,17 @@ mod tests {
             for (i, orig) in w_before.iter().enumerate() {
                 if i < g1.connections.len() {
                     let d = (g1.connections[i].weight - orig).abs();
-                    if d > 0.0 { sum_delta_low += d as f64; count_low += 1; }
+                    if d > 0.0 {
+                        sum_delta_low += d as f64;
+                        count_low += 1;
+                    }
                 }
                 if i < g2.connections.len() {
                     let d = (g2.connections[i].weight - orig).abs();
-                    if d > 0.0 { sum_delta_high += d as f64; count_high += 1; }
+                    if d > 0.0 {
+                        sum_delta_high += d as f64;
+                        count_high += 1;
+                    }
                 }
             }
         }
@@ -3364,14 +3486,25 @@ mod tests {
         }
 
         // With decay=0.9, trace should decay slowly
-        assert!(trace_values[0] > 0.01, "Trace should persist: {}", trace_values[0]);
-        assert!(trace_values[9] > 0.001, "Trace should persist at tick 10: {}", trace_values[9]);
+        assert!(
+            trace_values[0] > 0.01,
+            "Trace should persist: {}",
+            trace_values[0]
+        );
+        assert!(
+            trace_values[9] > 0.001,
+            "Trace should persist at tick 10: {}",
+            trace_values[9]
+        );
         // Trace should be monotonically decreasing (no input feeding it)
         for i in 1..trace_values.len() {
             assert!(
                 trace_values[i] <= trace_values[i - 1] + 1e-6,
                 "Trace should decrease: tick {} ({}) > tick {} ({})",
-                i, trace_values[i], i - 1, trace_values[i - 1]
+                i,
+                trace_values[i],
+                i - 1,
+                trace_values[i - 1]
             );
         }
     }
@@ -3409,14 +3542,20 @@ mod tests {
         input[0] = 0.7;
         brain.forward(&input);
         let trace_after_pulse = brain.traces[hidden as usize];
-        assert!((trace_after_pulse - 0.7).abs() < 1e-5, "trace={trace_after_pulse}");
+        assert!(
+            (trace_after_pulse - 0.7).abs() < 1e-5,
+            "trace={trace_after_pulse}"
+        );
 
         // Next tick with zero input
         let zero = [0.0f32; INPUT_SIZE];
         brain.forward(&zero);
         // With decay=0: trace = 0*old + 1*0.0 = 0.0
         let trace_after_zero = brain.traces[hidden as usize];
-        assert!((trace_after_zero).abs() < 1e-5, "trace should reset: {trace_after_zero}");
+        assert!(
+            (trace_after_zero).abs() < 1e-5,
+            "trace should reset: {trace_after_zero}"
+        );
     }
 
     #[test]
@@ -3445,7 +3584,10 @@ mod tests {
         }
         // Input nodes should remain 0.0 (mutations skip inputs)
         for ng in genome.node_genes.iter().take(INPUT_SIZE) {
-            assert_eq!(ng.trace_decay, 0.0, "Input node trace_decay should stay 0.0");
+            assert_eq!(
+                ng.trace_decay, 0.0,
+                "Input node trace_decay should stay 0.0"
+            );
         }
     }
 

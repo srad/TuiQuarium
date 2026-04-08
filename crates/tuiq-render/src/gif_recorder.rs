@@ -187,8 +187,7 @@ impl GifRecorder {
                 }
 
                 let gx = origin_x as i32 + gm.xmin;
-                let gy =
-                    origin_y as i32 + (self.baseline as i32 - gm.height as i32 - gm.ymin);
+                let gy = origin_y as i32 + (self.baseline as i32 - gm.height as i32 - gm.ymin);
 
                 for py in 0..gm.height {
                     for px in 0..gm.width {
@@ -198,11 +197,7 @@ impl GifRecorder {
                         }
                         let ix = gx + px as i32;
                         let iy = gy + py as i32;
-                        if ix < 0
-                            || iy < 0
-                            || ix >= self.img_w as i32
-                            || iy >= self.img_h as i32
-                        {
+                        if ix < 0 || iy < 0 || ix >= self.img_w as i32 || iy >= self.img_h as i32 {
                             continue;
                         }
                         let blended = blend(fg, bg, coverage);
@@ -266,9 +261,7 @@ pub fn recordings_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     } else {
         std::env::var("HOME")?
     };
-    let dir = PathBuf::from(home)
-        .join(".tuiquarium")
-        .join("recordings");
+    let dir = PathBuf::from(home).join(".tuiquarium").join("recordings");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

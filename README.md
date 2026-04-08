@@ -15,7 +15,8 @@
 <p align="center">
   No predefined species. No artificial food drops. Every creature emerges from a<br>
   continuous genome through mutation, crossover, and natural selection &mdash; rendered<br>
-  as procedural ASCII art &mdash; sustained entirely by evolving genome-driven producer colonies.
+  as procedural ASCII art &mdash; sustained by evolving rooted macrophytes, pelagic phytoplankton,
+  and nutrient cycling in a shallow-lake food web.
 </p>
 
 ## Simulation video
@@ -28,12 +29,12 @@
 
 ### Evolution &amp; Genetics
 
-- **Bottom-up emergent evolution** &mdash; no templates or predefined species; all creatures and producer colonies emerge from continuous genomes through mutation and selection
+- **Bottom-up emergent evolution** &mdash; no templates or predefined species; all creatures and rooted producer lineages emerge from continuous genomes through mutation and selection
 - **Creature genome** &mdash; 35+ float genes control body plan, appendages, eyes, coloring, behavior, and brain topology
-- **Producer genome** &mdash; 20 float genes control colony geometry, light capture, nutrient affinity, palatability, reserve allocation, and dispersal strategy; producer strategies emerge continuously rather than from hardcoded species types
+- **Producer genome** &mdash; 20 float genes control rooted macrophyte geometry, light capture, nutrient affinity, palatability, reserve allocation, and dispersal strategy; producer strategies emerge continuously rather than from hardcoded species types
 - **Complexity as a master gate** &mdash; a single 0.0&ndash;1.0 gene controls which morphological features are expressed in both creatures and producers; always mutates on reproduction (±0.15 drift) ensuring continuous exploration
 - **Bioenergetic creature reproduction** &mdash; consumers mature gradually, accumulate reproductive buffer from sustained surplus, and only then reproduce asexually or sexually
-- **Producer reproduction** &mdash; producer colonies allocate reserve surplus into broadcast propagules and local fragments; parent reserve is debited, establishment depends on light and crowding, and dispersal-vs-local-spread trade-offs are genome-controlled
+- **Producer reproduction** &mdash; rooted macrophytes allocate reserve surplus into broadcast propagules and local fragments; parent reserve is debited, establishment depends on benthic light and crowding, and dispersal-vs-local-spread trade-offs are genome-controlled
 - **Smooth complexity transitions** &mdash; gradual shift from asexual to sexual reproduction prevents evolutionary traps
 - **Complexity rewards** &mdash; higher complexity grants +50% sensory range and ~25% metabolism efficiency for creatures; +15% photosynthesis efficiency for producers
 - **Evolvable mutation rate** &mdash; `mutation_rate_factor` gene (0.5&ndash;2.0) scales the base mutation rate in both creatures and producers; meta-evolution tunes evolvability itself
@@ -67,17 +68,17 @@
 
 ### Self-Sustaining Ecosystem
 
-- **Genome-driven producer colonies** &mdash; producers evolve via a 20-float `ProducerGenome`; colony geometry, physiology, nutrient strategy, and dispersal mode all emerge from the genome
+- **Shallow-lake producer guilds** &mdash; rooted macrophytes evolve as ECS entities via a 20-float `ProducerGenome`, while phytoplankton is modeled separately as a suspended biomass pool that drives turbidity and pelagic production
 - **LAI-based photosynthesis with nutrient co-limitation** &mdash; canopy capture follows Beer&ndash;Lambert-style light interception, then realized growth is limited by light, dissolved nitrogen, and dissolved phosphorus
 - **Allometric producer metabolism** &mdash; maintenance and recovery scale with biomass rather than with fixed stage tables, following metabolic-scaling ideas
 - **Producer storage and regeneration** &mdash; dormant biomass and regenerative banks buffer dark periods, post-grazing recovery, and local fragmentation
 - **Rasterized canopy shading** &mdash; a tank-wide `LightField` applies continuous depth attenuation plus canopy, phytoplankton, and epiphyte shading
 - **Demand-limited grazing** &mdash; grazers remove active producer biomass first, can scrub fouling load, and intake is limited by consumer demand rather than by a fixed prey damage fraction
-- **Producer lifecycle stages** &mdash; colonies progress through Cell &rarr; Patch &rarr; Mature &rarr; Broadcasting &rarr; Collapsing from reserve status, biomass fill, stress load, and age
+- **Rooted macrophyte lifecycle stages** &mdash; producers progress through Cell &rarr; Patch &rarr; Mature &rarr; Broadcasting &rarr; Collapsing from reserve status, biomass fill, stress load, and age while remaining anchored to the substrate
 - **Procedural producer ASCII art** &mdash; 4 complexity tiers (speck, tuft, mat, plume) selected by raw genome complexity; producer size within each tier scales with lifecycle stage
-- **Reserve-cost producer reproduction** &mdash; mature producer colonies invest reserve surplus into broadcast propagules and fragments; establishment depends on local light, depth, and crowding
+- **Reserve-cost producer reproduction** &mdash; mature rooted macrophytes invest reserve surplus into broadcast propagules and fragments; establishment depends on benthic light, substrate, and local crowding
 - **No artificial food rain** &mdash; the ecosystem sustains itself entirely through producer photosynthesis; manual food drops still available via `f` key
-- **Nutrient cycling** &mdash; dead creatures become detritus entities, producer turnover returns N and P to dissolved/sediment pools, and nutrient load can drive phytoplankton shading; nitrogen fixation prevents irreversible N-depletion and a nutrient floor (5% of initial) ensures the ecosystem can always recover
+- **Nutrient cycling** &mdash; dead creatures become detritus entities, macrophyte turnover returns N and P to dissolved/sediment pools, and the phytoplankton pool contributes both shading and pelagic primary production; nitrogen fixation prevents irreversible N-depletion and a nutrient floor (5% of initial) ensures the ecosystem can always recover
 - **Substrate zones** &mdash; procedurally generated Sandy/Rocky/Planted substrate affects producer establishment; rocky zones favor high-hardiness producers, planted zones boost clonal spread
 - **Continuous depth/light attenuation** &mdash; underwater light declines smoothly with depth and water clarity rather than via three hard depth bands
 - **Night metabolism stress** &mdash; creatures burn 30% more energy at night, favoring complex creatures with metabolism efficiency bonuses
@@ -95,7 +96,7 @@
 - **Soft population cap** &mdash; reproduction suppressed above 600 creatures to maintain responsiveness
 - **HUD overlay** &mdash; population, generation, complexity, species count, diversity coefficient, split creature/producer birth-death counters, day, time, temperature, light, speed, plus a toggleable ecology diagnostics panel and a help popup (`?`) explaining all abbreviations
 - **PNG screenshots &amp; GIF recording** &mdash; `p` saves a full-resolution PNG; `g` toggles streaming GIF recording at configurable resolution and frame rate (see `constants.rs`), ideal for creating evolution time-lapses
-- **Single founder-web startup** &mdash; the visible run starts from low-biomass producer colonies and simple consumer founders, with no hidden warmup
+- **Single founder-web startup** &mdash; the visible run starts from low-biomass rooted macrophytes, a standing phytoplankton pool, and simple consumer founders, with no hidden warmup
 
 ## Quick Start
 
@@ -118,16 +119,16 @@ For a fixed-size cross-platform window frontend backed by `ratatui-wgpu`:
 cargo run --release -- --frontend gpu
 ```
 
-The GPU frontend uses the bundled JetBrains Mono font and keeps the aquarium at a
-fixed `136x44` simulation size instead of stretching the tank to the host terminal
-dimensions. Resizing the window changes the visual font scale and viewport so the
-same simulation fills the window like the terminal layout, with black background
-gutter only for leftover pixels that do not fit a full text cell.
+The GPU frontend uses the bundled JetBrains Mono font and keeps the shallow-lake
+view at a fixed `136x44` simulation size instead of stretching the tank to the
+host window. Resizing changes the visual font scale, while any leftover space
+stays black so the visible lake layout matches the terminal presentation.
 
-The default visible run starts directly from a simple aquatic founder web:
+The default visible run starts directly from a shallow-lake founder web:
 
-- low-biomass producer colonies
-- simple motile consumer founders
+- low-biomass rooted macrophytes
+- a standing phytoplankton pool
+- simple motile consumer founders distributed across benthic and mid-water habitat
 - no hidden warmup
 
 ### Run Tests
@@ -321,7 +322,7 @@ All genes are continuous floats. There are no discrete categories or predefined 
 
 ### Producer Genome
 
-Producer colonies have their own 20-float genome plus generation tracking. It drives colony geometry, physiology, stress tolerance, nutrient use, herbivory resistance, and dispersal strategy. Producer genomes evolve through mutation during reproduction (no crossover &mdash; producer colonies stay asexual in this model).
+Rooted macrophytes have their own 20-float genome plus generation tracking. It drives canopy geometry, physiology, stress tolerance, nutrient use, herbivory resistance, and dispersal strategy. Producer genomes evolve through mutation during reproduction (no crossover &mdash; producer lineages stay asexual in this model).
 
 | Gene Group | Genes | Range | Ecological Basis |
 |-----------|-------|-------|-----------------|
@@ -426,7 +427,7 @@ No artificial food is injected into the ecosystem. Energy enters through produce
 | Producer reserve buffering | Dormant biomass + regenerative bank translocation | Attached producer stands can survive dark/stress periods and regrow after defoliation |
 | Producer reproduction | Reserve surplus &times; reserve_allocation &times; maturity | Parent reserve is debited; broadcast and fragment propagules differ in cost and dispersal |
 | Producer establishment | Local light &times; crowding filter &times; propagule type | Fragments establish reliably nearby; broadcast propagules disperse farther but fail more often |
-| Producer mortality | Reserve exhaustion or severe tissue loss | No deterministic age kill-switch for healthy producer colonies |
+| Producer mortality | Reserve exhaustion or severe tissue loss | No deterministic age kill-switch for healthy rooted macrophytes |
 | Nutrient pool | Dissolved/sediment N and P + phytoplankton load | Couples producer growth, detritus recycling, and turbidity |
 | Grazer intake | Consumer energy deficit, body mass, graze skill, and handling-limited intake over time | Satiated grazers do less damage; hungry grazers strip leaf tissue first |
 | Detritus recycling | Dead creatures and plant turnover feed dissolved/sediment nutrients | Closes the nutrient loop |
@@ -546,6 +547,15 @@ Optimized for 600+ creatures at 20 ticks/sec:
 - [ ] Terminal resize handling
 - [ ] Configuration file for simulation parameters
 
+### Optional Ecosystem Improvements
+
+- [ ] Evolve phytoplankton as competing strain pools instead of one aggregate biomass value
+- [ ] Add direct pelagic grazing / filter-feeding so some consumers can exploit phytoplankton productivity
+- [ ] Introduce habitat-aware behavior for benthic, littoral, and mid-water consumer niches
+- [ ] Add depth-structured bathymetry / sediment gradients instead of a flat-bottom lake profile
+- [ ] Expand seasonal ecology with turnover, mixing, and stronger nutrient/light cycles
+- [ ] Improve early-succession presentation so young rooted macrophytes are easier to notice without changing the low-biomass startup model
+
 ## Contributing
 
 Contributions are welcome! Feel free to:
@@ -587,12 +597,12 @@ Please make sure `cargo test --workspace` passes before submitting.
 - Thompson & Eckert, [Trade-offs between sexual and clonal reproduction in aquatic plants](https://pubmed.ncbi.nlm.nih.gov/15149401/) (2004) &mdash; supports reserve-cost dispersal vs local spread allocation
 - Ren et al., [Water depth affects submersed macrophyte more than herbivorous snail in mesotrophic lakes](https://pmc.ncbi.nlm.nih.gov/articles/PMC11140150/) (2024) &mdash; supports grazing that can reduce attached growth while depth/light remains the dominant producer driver
 - J. Philip Grime, [Evidence for the Existence of Three Primary Strategies in Plants and Its Relevance to Ecological and Evolutionary Theory](https://doi.org/10.1086/283244) (The American Naturalist, 1977) &mdash; C-S-R triangle: Competitor/Stress-tolerator/Ruderal strategies; maps to producer genome trade-offs between photosynthesis rate, hardiness, and seed count
-- Aristid Lindenmayer, [Mathematical Models for Cellular Interaction in Development](https://doi.org/10.1016/0022-5193(68)90079-9) (Journal of Theoretical Biology, 1968) &mdash; L-systems: formal grammar for modeling branching plant morphology; informs producer colony geometry from branching and curvature genes
+- Aristid Lindenmayer, [Mathematical Models for Cellular Interaction in Development](https://doi.org/10.1016/0022-5193(68)90079-9) (Journal of Theoretical Biology, 1968) &mdash; L-systems: formal grammar for modeling branching plant morphology; informs rooted macrophyte geometry from branching and curvature genes
 
 ### Allometric Scaling &amp; Metabolism
 
 - Max Kleiber, [Body Size and Metabolic Rate](https://doi.org/10.1152/physrev.1947.27.4.511) (Physiological Reviews, 1947) &mdash; Kleiber's law: metabolic rate scales with mass^0.75; used for both creature and producer maintenance costs
-- Gillooly et al., [Effects of Size and Temperature on Developmental Time](https://doi.org/10.1038/417070a) (Nature, 2002) &mdash; supports scaling consumer maturation with body size on a weaker timescale than total lifespan in the aquatic founder web
+- Gillooly et al., [Effects of Size and Temperature on Developmental Time](https://doi.org/10.1038/417070a) (Nature, 2002) &mdash; supports scaling consumer maturation with body size on a weaker timescale than total lifespan in the shallow-lake founder web
 - Brown et al., [Toward a Metabolic Theory of Ecology](https://doi.org/10.1890/03-9000) (Ecology, 2004) &mdash; supports allometric maintenance and reserve-allocation framing across organisms
 - Bradford A. Calder III, *Size, Function, and Life History* (Harvard University Press, 1984) &mdash; allometric lifespan scaling: lifespan ∝ mass^0.25 across taxa; used for body-mass-dependent consumer longevity
 - Robert Henry Peters, *The Ecological Implications of Body Size* (Cambridge University Press, 1983) &mdash; broad allometric scaling survey; supports mass-dependent lifespan, metabolic rate, and home-range scaling

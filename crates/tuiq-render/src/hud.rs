@@ -16,7 +16,13 @@ fn total_producer_biomass(stats: &SimStats) -> f32 {
         + stats.producer_belowground_reserve
 }
 
-fn status_line(stats: &SimStats, env: &Environment, paused: bool, speed: f32, diversity: f32) -> String {
+fn status_line(
+    stats: &SimStats,
+    env: &Environment,
+    paused: bool,
+    speed: f32,
+    diversity: f32,
+) -> String {
     let time_str = format_time(env.time_of_day);
     let day_night = if env.is_night() { "Night " } else { "Day   " };
     let temp_str = format!("{:>3.0}C", env.temperature);
@@ -202,7 +208,11 @@ pub fn render_hud(
     }
 
     let rec_suffix = if is_recording {
-        format!(" ● REC {:02}:{:02}", recording_secs / 60, recording_secs % 60)
+        format!(
+            " ● REC {:02}:{:02}",
+            recording_secs / 60,
+            recording_secs % 60
+        )
     } else {
         String::new()
     };
@@ -217,16 +227,11 @@ pub fn render_hud(
     if area.height >= 1 {
         let y = footer_start;
         let line_area = Rect::new(area.x, y, area.width, 1);
-        let mut spans = vec![Span::styled(
-            status_text,
-            Style::default().fg(Color::White),
-        )];
+        let mut spans = vec![Span::styled(status_text, Style::default().fg(Color::White))];
         if is_recording {
             spans.push(Span::styled(
                 rec_suffix,
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         }
         let widget = Paragraph::new(Line::from(spans)).alignment(Alignment::Left);
@@ -355,7 +360,10 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Div", key_style),
-            Span::styled("     Diversity coefficient - mutation strength/variety", desc),
+            Span::styled(
+                "     Diversity coefficient - mutation strength/variety",
+                desc,
+            ),
         ]),
         Line::from(vec![
             Span::styled("  Day/Night", key_style),
@@ -439,10 +447,7 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
             Span::styled("  (low -> high)", dim),
         ]),
         Line::from(Span::raw("")),
-        Line::from(vec![Span::styled(
-            "  Press ? or h to close",
-            dim,
-        )]),
+        Line::from(vec![Span::styled("  Press ? or h to close", dim)]),
     ];
 
     let block = Block::default()

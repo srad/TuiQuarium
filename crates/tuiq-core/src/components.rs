@@ -139,6 +139,10 @@ pub struct ProducerAge {
     pub seconds: f32,
 }
 
+/// Marker for producer lineages that should remain visually rooted to the substrate.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RootedMacrophyte;
+
 /// Dynamic consumer life-history state.
 ///
 /// Research note: aquatic consumer reproduction depends on maturation delay and

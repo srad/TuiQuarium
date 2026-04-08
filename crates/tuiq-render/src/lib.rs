@@ -142,6 +142,16 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     )
 }
 
+fn bottom_aligned_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let rect = centered_rect(area, width, height);
+    Rect::new(
+        rect.x,
+        area.y + area.height.saturating_sub(rect.height),
+        rect.width,
+        rect.height,
+    )
+}
+
 /// The main TUI renderer using ratatui.
 pub struct TuiRenderer {
     bubbles: BubbleSystem,
@@ -184,7 +194,8 @@ impl TuiRenderer {
         let footer_rows = if display.show_diagnostics { 9 } else { 3 };
         let tank_width = tw.saturating_add(2);
         let tank_height = th.saturating_add(2);
-        let content_area = centered_rect(area, tank_width, tank_height.saturating_add(footer_rows));
+        let content_area =
+            bottom_aligned_rect(area, tank_width, tank_height.saturating_add(footer_rows));
         let tank_area = Rect::new(
             content_area.x,
             content_area.y,
@@ -323,6 +334,12 @@ mod tests {
     fn test_centered_rect_clamps_to_available_space() {
         let rect = centered_rect(Rect::new(4, 2, 40, 10), 98, 37);
         assert_eq!(rect, Rect::new(4, 2, 40, 10));
+    }
+
+    #[test]
+    fn test_bottom_aligned_rect_preserves_requested_width() {
+        let rect = bottom_aligned_rect(Rect::new(4, 2, 120, 50), 98, 37);
+        assert_eq!(rect, Rect::new(15, 15, 98, 37));
     }
 
     #[test]

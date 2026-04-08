@@ -42,27 +42,37 @@ pub fn compute_stage(
 
 /// ECS system: advance producer age, recompute stage, update appearance when stage changes.
 pub fn producer_lifecycle_system(world: &mut hecs::World, dt: f32) {
-    let mut updates: Vec<(hecs::Entity, ProducerGenome, ProducerStage)> = Vec::new();
+    let mut updates: Vec<(hecs::Entity, ProducerGenome, ProducerStage, Option<f32>)> = Vec::new();
 
-    for (entity, age, genome, state, stage, energy) in &mut world.query::<(
+    for (entity, age, genome, state, stage, energy, pos, bbox, rooted) in &mut world.query::<(
         hecs::Entity,
         &mut ProducerAge,
         &ProducerGenome,
         &ProducerState,
         &mut ProducerStage,
         &Energy,
+        &Position,
+        &BoundingBox,
+        Option<&RootedMacrophyte>,
     )>() {
         age.seconds += dt;
         let new_stage = compute_stage(genome, state, energy, age);
         if new_stage != *stage {
             *stage = new_stage;
-            updates.push((entity, genome.clone(), new_stage));
+            let bottom_anchor = rooted.map(|_| pos.y + bbox.h - 1.0);
+            updates.push((entity, genome.clone(), new_stage, bottom_anchor));
         }
     }
 
-    for (entity, genome, stage) in updates {
+    for (entity, genome, stage, bottom_anchor) in updates {
         let (appearance, bbox) = build_appearance_from_genome(&genome, stage);
+        let new_bottom = bottom_anchor.map(|bottom| (bottom - bbox.h + 1.0).max(0.0));
         let _ = world.insert(entity, (appearance, bbox, AnimationState::new(0.8)));
+        if let Some(new_y) = new_bottom {
+            if let Ok(mut pos) = world.get::<&mut Position>(entity) {
+                pos.y = new_y;
+            }
+        }
     }
 }
 
@@ -235,9 +245,9 @@ fn plume_art(genome: &ProducerGenome, stage: ProducerStage) -> (Vec<String>, Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::genome::ProducerGenome;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
-    use crate::genome::ProducerGenome;
 
     fn test_genome() -> ProducerGenome {
         let mut genome = ProducerGenome::minimal_producer(&mut StdRng::seed_from_u64(42));
@@ -327,10 +337,49 @@ mod tests {
                 color_index: 0,
             },
             BoundingBox { w: 1.0, h: 1.0 },
+            Position { x: 6.0, y: 12.0 },
         ));
 
         producer_lifecycle_system(&mut world, 1.0);
         let live_stage = *world.get::<&ProducerStage>(entity).unwrap();
         assert_eq!(live_stage, ProducerStage::Broadcasting);
+    }
+
+    #[test]
+    fn rooted_macrophyte_preserves_bottom_anchor_when_stage_changes() {
+        let mut world = hecs::World::new();
+        let genome = test_genome();
+        let stage = ProducerStage::Cell;
+        let initial_bbox = BoundingBox { w: 1.0, h: 1.0 };
+        let initial_pos = Position { x: 8.0, y: 16.0 };
+        let initial_bottom = initial_pos.y + initial_bbox.h - 1.0;
+
+        let entity = world.spawn((
+            ProducerAge { seconds: 24.0 },
+            genome.clone(),
+            test_state(&genome, 0.9, 0.9),
+            stage,
+            Energy::new_with(7.5, 8.0),
+            Appearance {
+                frame_sets: vec![
+                    vec![AsciiFrame::from_rows(vec!["."])],
+                    vec![AsciiFrame::from_rows(vec!["."])],
+                ],
+                facing: Direction::Right,
+                color_index: 0,
+            },
+            initial_bbox,
+            initial_pos,
+            RootedMacrophyte,
+        ));
+
+        producer_lifecycle_system(&mut world, 1.0);
+        let pos = world.get::<&Position>(entity).unwrap();
+        let bbox = world.get::<&BoundingBox>(entity).unwrap();
+        let new_bottom = pos.y + bbox.h - 1.0;
+        assert!(
+            (new_bottom - initial_bottom).abs() < 0.01,
+            "Rooted producer should preserve bottom anchor: initial={initial_bottom:.2} new={new_bottom:.2}"
+        );
     }
 }
