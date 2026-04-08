@@ -3061,6 +3061,7 @@ dependencies = [
  "hecs",
  "rand 0.10.0",
  "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -3085,8 +3086,11 @@ dependencies = [
  "ratatui",
  "ratatui-wgpu",
  "rustybuzz",
+ "serde",
+ "serde_json",
  "tuiq-core",
  "tuiq-render",
+ "uuid",
  "winit",
 ]
 
@@ -3188,6 +3192,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

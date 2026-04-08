@@ -273,6 +273,7 @@ impl ApplicationHandler for WgpuApp {
 fn action_from_key(key: &Key) -> Option<AppAction> {
     match key {
         Key::Named(NamedKey::Escape) => Some(AppAction::Quit),
+        Key::Named(NamedKey::Enter) => Some(AppAction::Confirm),
         Key::Named(NamedKey::Space) => Some(AppAction::TogglePause),
         Key::Named(NamedKey::ArrowRight) => Some(AppAction::IncreaseSpeed),
         Key::Named(NamedKey::ArrowLeft) => Some(AppAction::DecreaseSpeed),
@@ -288,6 +289,8 @@ fn action_from_key(key: &Key) -> Option<AppAction> {
             Some(AppAction::ToggleHelp)
         }
         Key::Character(text) if text.eq_ignore_ascii_case("p") => Some(AppAction::SaveScreenshot),
+        Key::Character(text) if text.eq_ignore_ascii_case("s") => Some(AppAction::SaveSession),
+        Key::Character(text) if text.eq_ignore_ascii_case("e") => Some(AppAction::ExportHistory),
         Key::Character(text) if text.eq_ignore_ascii_case("g") => Some(AppAction::ToggleRecording),
         Key::Character(text) if text.eq_ignore_ascii_case("t") => Some(AppAction::NextTheme),
         _ => None,

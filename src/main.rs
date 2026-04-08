@@ -1,7 +1,9 @@
+mod session_persistence;
 mod wgpu_frontend;
 
 use std::error::Error;
 use std::io;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -9,7 +11,16 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::Backend, backend::CrosstermBackend, Terminal};
+use ratatui::{
+    backend::Backend,
+    backend::CrosstermBackend,
+    layout::{Alignment, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Terminal,
+};
+use uuid::Uuid;
 
 use tuiq_core::components::*;
 use tuiq_core::genome::CreatureGenome;
@@ -54,6 +65,7 @@ enum CliAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppAction {
     Quit,
+    Confirm,
     TogglePause,
     IncreaseSpeed,
     DecreaseSpeed,
@@ -64,6 +76,8 @@ enum AppAction {
     Reset,
     ToggleHelp,
     SaveScreenshot,
+    SaveSession,
+    ExportHistory,
     ToggleRecording,
     NextTheme,
 }
@@ -78,7 +92,8 @@ fn action_allows_repeat(action: AppAction) -> bool {
     )
 }
 
-struct AppState {
+struct SessionState {
+    session_id: Uuid,
     sim: AquariumSim,
     renderer: TuiRenderer,
     paused: bool,
@@ -91,7 +106,7 @@ struct AppState {
     accumulator: Duration,
 }
 
-impl AppState {
+impl SessionState {
     fn new() -> Self {
         let mut sim = AquariumSim::new(FIXED_TANK_WIDTH, FIXED_TANK_HEIGHT);
         let mut renderer = TuiRenderer::new();
@@ -107,6 +122,7 @@ impl AppState {
         ));
 
         Self {
+            session_id: Uuid::new_v4(),
             sim,
             renderer,
             paused: false,
@@ -162,6 +178,7 @@ impl AppState {
     fn apply_action(&mut self, action: AppAction) -> io::Result<bool> {
         match action {
             AppAction::Quit => return Ok(true),
+            AppAction::Confirm => {}
             AppAction::TogglePause => self.paused = !self.paused,
             AppAction::IncreaseSpeed => {
                 self.speed = increase_sim_speed(self.speed);
@@ -210,6 +227,8 @@ impl AppState {
                         .flash_message(format!("Cannot create screenshot dir: {e}")),
                 }
             }
+            AppAction::SaveSession => {}
+            AppAction::ExportHistory => {}
             AppAction::ToggleRecording => {
                 if self.renderer.is_recording() {
                     if let Some((path, count)) = self.renderer.stop_recording() {
@@ -264,6 +283,215 @@ impl AppState {
             BoundingBox { w: 1.0, h: 1.0 },
             appearance,
         );
+    }
+}
+
+struct AppState {
+    mode: AppMode,
+}
+
+enum AppMode {
+    Startup(StartupMenuState),
+    SaveBrowser(SaveBrowserState),
+    Running(SessionState),
+}
+
+struct StartupMenuState {
+    selected: usize,
+    has_valid_save: bool,
+    message: Option<String>,
+}
+
+struct SaveBrowserState {
+    selected: usize,
+    entries: Vec<session_persistence::SaveListEntry>,
+    message: Option<String>,
+}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            mode: AppMode::Startup(Self::startup_menu(None)),
+        }
+    }
+
+    fn startup_menu(message: Option<String>) -> StartupMenuState {
+        let entries = session_persistence::list_save_entries().unwrap_or_default();
+        StartupMenuState {
+            selected: 0,
+            has_valid_save: session_persistence::latest_valid_save(&entries).is_some(),
+            message,
+        }
+    }
+
+    fn save_browser(message: Option<String>) -> SaveBrowserState {
+        SaveBrowserState {
+            selected: 0,
+            entries: session_persistence::list_save_entries().unwrap_or_default(),
+            message,
+        }
+    }
+
+    fn display_state(&self) -> DisplayState {
+        match &self.mode {
+            AppMode::Running(session) => session.display_state(),
+            _ => DisplayState {
+                paused: false,
+                speed: 1.0,
+                show_diagnostics: false,
+                show_help: false,
+                is_recording: false,
+                recording_secs: 0,
+                theme: RenderTheme::Ocean,
+            },
+        }
+    }
+
+    fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<(), B::Error> {
+        match &mut self.mode {
+            AppMode::Running(session) => session.draw(terminal),
+            AppMode::Startup(menu) => {
+                terminal.draw(|frame| render_startup_menu(frame, menu))?;
+                Ok(())
+            }
+            AppMode::SaveBrowser(browser) => {
+                terminal.draw(|frame| render_save_browser(frame, browser))?;
+                Ok(())
+            }
+        }
+    }
+
+    fn advance(&mut self) {
+        if let AppMode::Running(session) = &mut self.mode {
+            session.advance();
+        }
+    }
+
+    fn apply_action(&mut self, action: AppAction) -> io::Result<bool> {
+        let placeholder = AppMode::Startup(Self::startup_menu(None));
+        let current_mode = std::mem::replace(&mut self.mode, placeholder);
+
+        match current_mode {
+            AppMode::Running(mut session) => {
+                match action {
+                    AppAction::SaveSession => match session_persistence::save_session(&session) {
+                        Ok(paths) => session.renderer.flash_message(format!(
+                            "Session saved\n{}\nCSV exported\n{}",
+                            abbreviate_path_for_flash(&paths.session_path, 72),
+                            abbreviate_path_for_flash(&paths.history_csv_path, 72),
+                        )),
+                        Err(err) => session
+                            .renderer
+                            .flash_message(format!("Session save failed: {err}")),
+                    },
+                    AppAction::ExportHistory => {
+                        match session_persistence::export_history_csv(&session) {
+                            Ok(_) => session
+                                .renderer
+                                .flash_message("History CSV exported".to_string()),
+                            Err(err) => session
+                                .renderer
+                                .flash_message(format!("History export failed: {err}")),
+                        }
+                    }
+                    other => {
+                        let should_quit = session.apply_action(other)?;
+                        self.mode = AppMode::Running(session);
+                        return Ok(should_quit);
+                    }
+                }
+                self.mode = AppMode::Running(session);
+                Ok(false)
+            }
+            AppMode::Startup(mut menu) => {
+                match action {
+                    AppAction::IncreaseDiversity => {
+                        menu.selected = menu.selected.saturating_sub(1);
+                        self.mode = AppMode::Startup(menu);
+                        Ok(false)
+                    }
+                    AppAction::DecreaseDiversity => {
+                        menu.selected = (menu.selected + 1).min(3);
+                        self.mode = AppMode::Startup(menu);
+                        Ok(false)
+                    }
+                    AppAction::Confirm => match menu.selected {
+                        0 => {
+                            self.mode = AppMode::Running(SessionState::new());
+                            Ok(false)
+                        }
+                        1 => {
+                            let entries = session_persistence::list_save_entries().unwrap_or_default();
+                            if let Some(entry) = session_persistence::latest_valid_save(&entries) {
+                                match session_persistence::load_session(&entry.path) {
+                                    Ok(session) => self.mode = AppMode::Running(session),
+                                    Err(err) => {
+                                        menu.message = Some(format!("Load failed: {err}"));
+                                        self.mode = AppMode::Startup(menu);
+                                    }
+                                }
+                            } else {
+                                menu.message = Some("No valid saves found".to_string());
+                                self.mode = AppMode::Startup(menu);
+                            }
+                            Ok(false)
+                        }
+                        2 => {
+                            self.mode = AppMode::SaveBrowser(Self::save_browser(None));
+                            Ok(false)
+                        }
+                        _ => Ok(true),
+                    },
+                    AppAction::Quit => Ok(true),
+                    _ => {
+                        self.mode = AppMode::Startup(menu);
+                        Ok(false)
+                    }
+                }
+            }
+            AppMode::SaveBrowser(mut browser) => {
+                match action {
+                    AppAction::IncreaseDiversity => {
+                        browser.selected = browser.selected.saturating_sub(1);
+                    }
+                    AppAction::DecreaseDiversity => {
+                        if !browser.entries.is_empty() {
+                            browser.selected =
+                                (browser.selected + 1).min(browser.entries.len().saturating_sub(1));
+                        }
+                    }
+                    AppAction::Confirm => {
+                        let Some(entry) = browser.entries.get(browser.selected) else {
+                            browser.message = Some("No saves available".to_string());
+                            self.mode = AppMode::SaveBrowser(browser);
+                            return Ok(false);
+                        };
+                        match &entry.preview {
+                            Ok(_) => match session_persistence::load_session(&entry.path) {
+                                Ok(session) => {
+                                    self.mode = AppMode::Running(session);
+                                    return Ok(false);
+                                }
+                                Err(err) => {
+                                    browser.message = Some(format!("Load failed: {err}"));
+                                }
+                            },
+                            Err(err) => {
+                                browser.message =
+                                    Some(format!("Save is not loadable: {err}"));
+                            }
+                        }
+                    }
+                    AppAction::Quit => {
+                        self.mode = AppMode::Startup(Self::startup_menu(browser.message.take()));
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+                self.mode = AppMode::SaveBrowser(browser);
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -329,6 +557,11 @@ fn print_help() {
     println!("  terminal  Crossterm terminal backend");
     println!("  gpu       ratatui-wgpu window backend with fixed aquarium sizing");
     println!("            and automatic font scaling on resize");
+    println!();
+    println!("Startup menu:");
+    println!("  New Simulation | Continue Latest Save | Load Save... | Quit");
+    println!("In-run save/export:");
+    println!("  s = save session, e = export daily history CSV");
 }
 
 fn increase_sim_speed(speed: f32) -> f32 {
@@ -337,6 +570,35 @@ fn increase_sim_speed(speed: f32) -> f32 {
 
 fn decrease_sim_speed(speed: f32) -> f32 {
     (speed - SIM_SPEED_STEP).max(MIN_SIM_SPEED)
+}
+
+fn abbreviate_path_for_flash(path: &Path, max_chars: usize) -> String {
+    let display = path.display().to_string();
+    if display.chars().count() <= max_chars {
+        return display;
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if file_name.chars().count() + 4 >= max_chars {
+        let tail_len = max_chars.saturating_sub(3);
+        let tail: String = display
+            .chars()
+            .rev()
+            .take(tail_len)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        return format!("...{tail}");
+    }
+
+    let separator = std::path::MAIN_SEPARATOR;
+    let remaining = max_chars.saturating_sub(file_name.chars().count() + 4);
+    let prefix: String = display.chars().take(remaining).collect();
+    format!("{prefix}...{separator}{file_name}")
 }
 
 fn run_terminal() -> io::Result<()> {
@@ -392,6 +654,7 @@ fn poll_terminal_action() -> io::Result<Option<AppAction>> {
 
     let action = match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Some(AppAction::Quit),
+        KeyCode::Enter => Some(AppAction::Confirm),
         KeyCode::Char(' ') => Some(AppAction::TogglePause),
         KeyCode::Right => Some(AppAction::IncreaseSpeed),
         KeyCode::Left => Some(AppAction::DecreaseSpeed),
@@ -402,6 +665,8 @@ fn poll_terminal_action() -> io::Result<Option<AppAction>> {
         KeyCode::Char('r') => Some(AppAction::Reset),
         KeyCode::Char('?') | KeyCode::Char('h') => Some(AppAction::ToggleHelp),
         KeyCode::Char('p') => Some(AppAction::SaveScreenshot),
+        KeyCode::Char('s') => Some(AppAction::SaveSession),
+        KeyCode::Char('e') => Some(AppAction::ExportHistory),
         KeyCode::Char('g') => Some(AppAction::ToggleRecording),
         KeyCode::Char('t') => Some(AppAction::NextTheme),
         _ => None,
@@ -411,6 +676,149 @@ fn poll_terminal_action() -> io::Result<Option<AppAction>> {
         Some(action) if key.kind == KeyEventKind::Repeat && !action_allows_repeat(action) => None,
         other => other,
     })
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width).max(40);
+    let height = height.min(area.height).max(10);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
+}
+
+fn render_startup_menu(frame: &mut ratatui::Frame, menu: &StartupMenuState) {
+    let area = centered_rect(frame.area(), 56, 14);
+    let items = [
+        ("New Simulation", true),
+        ("Continue Latest Save", menu.has_valid_save),
+        ("Load Save...", true),
+        ("Quit", true),
+    ];
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "TuiQuarium",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("Version {}", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::raw("")),
+    ];
+
+    for (index, (label, enabled)) in items.iter().enumerate() {
+        let mut style = if *enabled {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let prefix = if index == menu.selected { ">" } else { " " };
+        if index == menu.selected {
+            style = if *enabled {
+                style.add_modifier(Modifier::BOLD).fg(Color::Yellow)
+            } else {
+                style.add_modifier(Modifier::DIM)
+            };
+        }
+        lines.push(Line::from(Span::styled(format!(" {prefix} {label}"), style)));
+    }
+
+    lines.push(Line::from(Span::raw("")));
+    lines.push(Line::from(Span::styled(
+        "Up/Down: Move  Enter: Select  Esc: Quit",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if let Some(message) = &menu.message {
+        lines.push(Line::from(Span::raw("")));
+        lines.push(Line::from(Span::styled(
+            message.clone(),
+            Style::default().fg(Color::LightRed),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Startup"))
+        .alignment(Alignment::Left);
+    frame.render_widget(Clear, area);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_save_browser(frame: &mut ratatui::Frame, browser: &SaveBrowserState) {
+    let area = centered_rect(frame.area(), 88, 22);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Load Saved Session",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Up/Down: Move  Enter: Load  Esc: Back",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::raw("")),
+    ];
+
+    if browser.entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No save files found in ~/.tuiquarium/saves/",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for (index, entry) in browser.entries.iter().enumerate() {
+            let selected = index == browser.selected;
+            let prefix = if selected { ">" } else { " " };
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            lines.push(Line::from(Span::styled(
+                format!(" {prefix} {}", entry.label),
+                style,
+            )));
+            match &entry.preview {
+                Ok(preview) => lines.push(Line::from(Span::styled(
+                    format!(
+                        "    Day {} | Pop {} | Sp {} | Prod {:.1} | {} | {}",
+                        preview.summary.day,
+                        preview.summary.creature_count,
+                        preview.summary.species_count,
+                        preview.summary.producer_biomass,
+                        preview.app_version,
+                        entry.saved_at_unix_secs
+                    ),
+                    Style::default().fg(Color::Gray),
+                ))),
+                Err(err) => lines.push(Line::from(Span::styled(
+                    format!("    Invalid save: {err}"),
+                    Style::default().fg(Color::LightRed),
+                ))),
+            }
+        }
+    }
+
+    if let Some(message) = &browser.message {
+        lines.push(Line::from(Span::raw("")));
+        lines.push(Line::from(Span::styled(
+            message.clone(),
+            Style::default().fg(Color::LightRed),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Saves"))
+        .alignment(Alignment::Left);
+    frame.render_widget(Clear, area);
+    frame.render_widget(paragraph, area);
 }
 
 #[cfg(test)]

@@ -74,7 +74,7 @@ fn ecology_line(stats: &SimStats) -> String {
 }
 
 fn controls_line() -> &'static str {
-    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  t:Theme  p:Screenshot  g:Record  ?:Help "
+    " q:Quit  Space:Pause  L/R:Speed  U/D:Diversity  r:Reset  f:Feed  d:Diag  t:Theme  p:Screenshot  s:Save  e:CSV  g:Record  ?:Help "
 }
 
 fn sparkline(values: &[f32], target_len: usize) -> String {
@@ -337,6 +337,14 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
             Span::styled("       Save PNG screenshot", desc),
         ]),
         Line::from(vec![
+            Span::styled("  s", key_style),
+            Span::styled("       Save simulation session", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  e", key_style),
+            Span::styled("       Export daily history CSV", desc),
+        ]),
+        Line::from(vec![
             Span::styled("  g", key_style),
             Span::styled("       Toggle GIF recording", desc),
         ]),
@@ -467,9 +475,19 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
 
 /// Render a small transient notification popup (centered near the top).
 pub fn render_flash_popup(frame: &mut Frame, area: Rect, message: &str) {
-    let msg_width = message.len() as u16 + 4; // 2 border + 2 padding
-    let popup_w = msg_width.min(area.width);
-    let popup_h = 3u16.min(area.height);
+    let max_popup_w = area.width.saturating_sub(4).clamp(24, 84);
+    let longest_line = message.lines().map(|line| line.chars().count()).max().unwrap_or(0);
+    let popup_w = (longest_line as u16 + 4).min(max_popup_w).min(area.width);
+    let content_w = popup_w.saturating_sub(2).max(1) as usize;
+    let wrapped_lines: u16 = message
+        .lines()
+        .map(|line| {
+            let len = line.chars().count().max(1);
+            len.div_ceil(content_w) as u16
+        })
+        .sum::<u16>()
+        .max(1);
+    let popup_h = (wrapped_lines + 2).min(area.height.saturating_sub(1).max(3));
     let x = area.x + area.width.saturating_sub(popup_w) / 2;
     let y = area.y + 2.min(area.height.saturating_sub(popup_h));
     let popup_area = Rect::new(x, y, popup_w, popup_h);
@@ -479,14 +497,15 @@ pub fn render_flash_popup(frame: &mut Frame, area: Rect, message: &str) {
         .border_style(Style::default().fg(Color::Green))
         .style(Style::default().bg(Color::Black));
 
-    let text = Paragraph::new(Line::from(Span::styled(
-        message,
+    let text = Paragraph::new(message)
+    .block(block)
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: false })
+    .style(
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
-    )))
-    .block(block)
-    .alignment(Alignment::Center);
+    );
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(text, popup_area);
