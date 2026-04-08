@@ -25,13 +25,14 @@ const MUTATION_RATE: f32 = 0.15;
 /// Higher mutation rate for asexual division (more drift).
 const ASEXUAL_MUTATION_RATE: f32 = 0.25;
 /// Maximum number of offspring per tick (prevents burst spawning).
-const MAX_BIRTHS_PER_TICK: usize = 3;
+const MAX_BIRTHS_PER_TICK: usize = 2;
 
 /// Find ready-to-reproduce creatures and spawn offspring.
 /// Simple cells (complexity < 0.5) reproduce asexually.
 /// Complex creatures need a compatible mate nearby.
-/// Maximum creature population before reproduction is suppressed.
-const MAX_POPULATION: usize = 600;
+fn max_population_for_tank(tank_w: f32, tank_h: f32) -> usize {
+    (((tank_w.max(1.0) * tank_h.max(1.0)).sqrt() * 4.2).round() as usize).clamp(90, 360)
+}
 
 pub fn reproduction_system(
     world: &mut World,
@@ -45,9 +46,11 @@ pub fn reproduction_system(
     diversity_coefficient: f32,
 ) -> Vec<Entity> {
     // Soft population cap — stop reproducing when crowded
-    if creature_count >= MAX_POPULATION {
+    let max_population = max_population_for_tank(tank_w, tank_h);
+    if creature_count >= max_population {
         return Vec::new();
     }
+    let crowding = creature_count as f32 / max_population.max(1) as f32;
 
     // Fitness sharing: group creatures into species and compute reproduction probability.
     // Larger species get proportionally less reproduction chance, protecting innovation.
@@ -95,12 +98,12 @@ pub fn reproduction_system(
             &DerivedPhysics,
             &crate::components::ConsumerState,
         )>() {
-            let reserve_threshold = (0.52_f32 + 0.06 * genome.complexity).clamp(0.52, 0.66);
+            let reserve_threshold = (0.50_f32 + 0.05 * genome.complexity).clamp(0.50, 0.62);
             let reproductive_threshold = consumer_reproductive_threshold(physics, genome);
             if state.is_adult()
                 && state.brood_cooldown <= 0.0
                 && state.reproductive_buffer >= reproductive_threshold
-                && needs.reproduction > 0.42
+                && needs.reproduction > 0.30
                 && energy.fraction() > reserve_threshold
             {
                 v.push((
@@ -132,6 +135,13 @@ pub fn reproduction_system(
         if already_mated.contains(&parent_a) {
             continue;
         }
+        if crowding > 0.70 {
+            let suppression = ((crowding - 0.70) / 0.30).clamp(0.0, 1.0);
+            let allow = (1.0 - suppression * 0.82).clamp(0.12, 1.0);
+            if !rng.random_bool(allow as f64) {
+                continue;
+            }
+        }
 
         // Fitness sharing: larger species reproduce less to protect innovation.
         // Higher diversity_coefficient strengthens the penalty, promoting variety.
@@ -139,8 +149,7 @@ pub fn reproduction_system(
             let sp_size = *species_sizes.get(&sp).unwrap_or(&1);
             if sp_size > 3 {
                 let effective_sharing = evolution.fitness_sharing_strength * diversity_coefficient;
-                let prob = (3.0 / sp_size as f32)
-                    .powf(effective_sharing.clamp(0.25, 3.0));
+                let prob = (3.0 / sp_size as f32).powf(effective_sharing.clamp(0.25, 3.0));
                 if !rng.random_bool(prob as f64) {
                     continue;
                 }
@@ -214,7 +223,13 @@ pub fn reproduction_system(
                         * 0.5
                         * evolution.creature_mutation_multiplier
                         * diversity_coefficient;
-                    mutate(&mut child, effective_rate, diversity_coefficient, rng, tracker);
+                    mutate(
+                        &mut child,
+                        effective_rate,
+                        diversity_coefficient,
+                        rng,
+                        tracker,
+                    );
                     mate_id = Some(mate);
                     required_buffer = shared_threshold;
                     child_genome = Some(child);
@@ -240,7 +255,13 @@ pub fn reproduction_system(
                     * mutation_factor
                     * evolution.creature_mutation_multiplier
                     * diversity_coefficient;
-                mutate(&mut child, effective_rate, diversity_coefficient, rng, tracker);
+                mutate(
+                    &mut child,
+                    effective_rate,
+                    diversity_coefficient,
+                    rng,
+                    tracker,
+                );
                 child_genome = Some(child);
             } else {
                 continue; // Too complex for asexual, no mate found
@@ -328,21 +349,20 @@ pub fn reproduction_system(
             world.get::<&DerivedPhysics>(parent_a),
         ) {
             (Ok(g), Ok(physics)) => {
-                let generation_pace = (1.15
-                    - g.complexity * 0.38
-                    - physics.body_mass.max(0.1).powf(0.28) * 0.14)
-                    .clamp(0.62, 1.15);
+                let generation_pace =
+                    (1.15 - g.complexity * 0.38 - physics.body_mass.max(0.1).powf(0.28) * 0.14)
+                        .clamp(0.62, 1.15);
                 (170.0 - g.behavior.reproduction_rate * 70.0) / generation_pace
             }
             _ => 140.0,
         };
         if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(parent_a) {
             state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-            state.brood_cooldown = parent_cooldown.max(45.0);
+            state.brood_cooldown = parent_cooldown.max(72.0);
             state.recent_assimilation *= 0.6;
         }
         if let Ok(mut e) = world.get::<&mut Energy>(parent_a) {
-            e.current -= e.max * 0.14;
+            e.current -= e.max * 0.18;
         }
         if let Ok(mut n) = world.get::<&mut Needs>(parent_a) {
             n.reproduction = 0.0;
@@ -354,21 +374,20 @@ pub fn reproduction_system(
                 world.get::<&DerivedPhysics>(mate),
             ) {
                 (Ok(g), Ok(physics)) => {
-                    let generation_pace = (1.15
-                        - g.complexity * 0.38
-                        - physics.body_mass.max(0.1).powf(0.28) * 0.14)
-                        .clamp(0.62, 1.15);
+                    let generation_pace =
+                        (1.15 - g.complexity * 0.38 - physics.body_mass.max(0.1).powf(0.28) * 0.14)
+                            .clamp(0.62, 1.15);
                     (170.0 - g.behavior.reproduction_rate * 70.0) / generation_pace
                 }
                 _ => 140.0,
             };
             if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(mate) {
                 state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-                state.brood_cooldown = mate_cooldown.max(45.0);
+                state.brood_cooldown = mate_cooldown.max(72.0);
                 state.recent_assimilation *= 0.6;
             }
             if let Ok(mut e) = world.get::<&mut Energy>(mate) {
-                e.current -= e.max * 0.14;
+                e.current -= e.max * 0.18;
             }
             if let Ok(mut n) = world.get::<&mut Needs>(mate) {
                 n.reproduction = 0.0;
@@ -961,8 +980,8 @@ mod tests {
             total_births
         };
 
-        let births_low = run(0.25);   // low diversity = weak fitness sharing
-        let births_high = run(2.5);   // high diversity = strong fitness sharing
+        let births_low = run(0.25); // low diversity = weak fitness sharing
+        let births_high = run(2.5); // high diversity = strong fitness sharing
 
         assert!(
             births_low > births_high,

@@ -34,7 +34,7 @@ impl super::AquariumSim {
         // consumer overshoot relative to producer recovery in small ecosystems.
         // Calder (1984), Peters (1983): lifespan ∝ mass^0.25 across taxa.
         let size_longevity = physics.body_mass.max(0.1).powf(0.25);
-        let max_ticks = (48_000.0 * genome.behavior.max_lifespan_factor * size_longevity) as u64;
+        let max_ticks = (42_000.0 * genome.behavior.max_lifespan_factor * size_longevity) as u64;
 
         let vx: f32 = self.rng.random_range(-1.0..1.0);
         let vy: f32 = self.rng.random_range(-0.5..0.5);
@@ -86,8 +86,8 @@ impl super::AquariumSim {
         entity
     }
 
-    /// Spawn a producer colony entity from a genome.
-    /// The genome determines the colony's physics, appearance, and persistence.
+    /// Spawn a producer entity from a genome.
+    /// The genome determines the producer's physics, appearance, and persistence.
     pub fn spawn_producer(
         &mut self,
         pos: Position,
@@ -170,7 +170,7 @@ impl super::AquariumSim {
         let stage = producer_lifecycle::compute_stage(&genome, &state, &energy, &age);
         let (appearance, bbox) = producer_lifecycle::build_appearance_from_genome(&genome, stage);
 
-        self.world.spawn((
+        let entity = self.world.spawn((
             pos,
             Velocity { vx: 0.0, vy: 0.0 },
             bbox,
@@ -188,7 +188,12 @@ impl super::AquariumSim {
                 ticks: 0,
                 max_ticks: lifespan_ticks,
             },
-        ))
+        ));
+        if propagule_kind.is_some() {
+            let _ = self.world.insert(entity, (RootedMacrophyte,));
+            self.anchor_rooted_macrophyte(entity);
+        }
+        entity
     }
 
     /// Spawn a food pellet (producer) that sinks and can be eaten.
@@ -278,24 +283,53 @@ impl super::AquariumSim {
         ));
     }
 
+    fn rooted_macrophyte_top_y(&self, height: f32) -> f32 {
+        (self.tank_height as f32 - 2.0 - height.max(1.0)).max(0.0)
+    }
+
+    pub(crate) fn rooted_settlement_y(&self) -> f32 {
+        (self.tank_height as f32 - 3.0).max(1.0)
+    }
+
+    fn clamp_rooted_x(&self, x: f32, width: f32) -> f32 {
+        let max_x = (self.tank_width as f32 - width.max(1.0)).max(0.0);
+        x.clamp(0.0, max_x)
+    }
+
+    fn anchor_rooted_macrophyte(&mut self, entity: Entity) {
+        if self.world.get::<&RootedMacrophyte>(entity).is_err() {
+            return;
+        }
+
+        let bbox = match self.world.get::<&BoundingBox>(entity) {
+            Ok(bbox) => bbox.clone(),
+            Err(_) => return,
+        };
+
+        if let Ok(mut pos) = self.world.get::<&mut Position>(entity) {
+            pos.x = self.clamp_rooted_x(pos.x, bbox.w);
+            pos.y = self.rooted_macrophyte_top_y(bbox.h);
+        }
+    }
+
     fn founder_grazer_consumer_genome(&mut self) -> CreatureGenome {
         let mut genome = CreatureGenome::minimal_cell(&mut self.rng);
         // Research note: the unified model starts from simple motile
         // heterotrophs rather than from already complex animal-like founders.
-        genome.art.body_size = 0.58 + self.rng.random_range(-0.04..0.04);
+        genome.art.body_size = 0.54 + self.rng.random_range(-0.04..0.04);
         genome.art.body_elongation = 0.40 + self.rng.random_range(-0.08..0.08);
         genome.art.body_height_ratio = 0.50 + self.rng.random_range(-0.08..0.08);
         genome.art.pattern_density = 0.06 + self.rng.random_range(-0.04..0.08);
         genome.behavior.aggression = 0.02 + self.rng.random_range(0.0..0.03);
         genome.behavior.hunting_instinct = 0.0;
-        genome.behavior.mouth_size = 0.55 + self.rng.random_range(-0.05..0.06);
-        genome.behavior.speed_factor = 0.90 + self.rng.random_range(-0.06..0.08);
-        genome.behavior.metabolism_factor = 0.65 + self.rng.random_range(-0.06..0.06);
-        genome.behavior.max_lifespan_factor = 2.00 + self.rng.random_range(-0.16..0.24);
-        genome.behavior.reproduction_rate = 0.42 + self.rng.random_range(-0.06..0.08);
+        genome.behavior.mouth_size = 0.46 + self.rng.random_range(-0.05..0.05);
+        genome.behavior.speed_factor = 0.94 + self.rng.random_range(-0.06..0.08);
+        genome.behavior.metabolism_factor = 0.58 + self.rng.random_range(-0.05..0.05);
+        genome.behavior.max_lifespan_factor = 2.12 + self.rng.random_range(-0.16..0.24);
+        genome.behavior.reproduction_rate = 0.60 + self.rng.random_range(-0.06..0.08);
         genome.behavior.learning_rate = 0.0;
-        genome.behavior.pheromone_sensitivity = 0.16 + self.rng.random_range(-0.06..0.08);
-        genome.complexity = 0.08 + self.rng.random_range(-0.03..0.05);
+        genome.behavior.pheromone_sensitivity = 0.36 + self.rng.random_range(-0.06..0.08);
+        genome.complexity = 0.10 + self.rng.random_range(-0.03..0.05);
         genome
     }
 
@@ -304,20 +338,20 @@ impl super::AquariumSim {
         // Simulation assumption: the founder web should include more than one
         // low-complexity heterotroph strategy, otherwise the diversity metric
         // starts from an artificial single-clone cloud.
-        genome.art.body_size = 0.44 + self.rng.random_range(-0.04..0.04);
+        genome.art.body_size = 0.46 + self.rng.random_range(-0.04..0.04);
         genome.art.body_elongation = 0.18 + self.rng.random_range(-0.08..0.08);
         genome.art.body_height_ratio = 0.70 + self.rng.random_range(-0.08..0.08);
         genome.art.pattern_density = 0.02 + self.rng.random_range(0.0..0.06);
         genome.behavior.aggression = 0.01 + self.rng.random_range(0.0..0.02);
         genome.behavior.hunting_instinct = 0.0;
         genome.behavior.mouth_size = 0.28 + self.rng.random_range(-0.05..0.05);
-        genome.behavior.speed_factor = 0.68 + self.rng.random_range(-0.06..0.06);
-        genome.behavior.metabolism_factor = 0.52 + self.rng.random_range(-0.05..0.05);
-        genome.behavior.max_lifespan_factor = 2.25 + self.rng.random_range(-0.18..0.22);
-        genome.behavior.reproduction_rate = 0.56 + self.rng.random_range(-0.05..0.08);
+        genome.behavior.speed_factor = 0.72 + self.rng.random_range(-0.06..0.06);
+        genome.behavior.metabolism_factor = 0.48 + self.rng.random_range(-0.05..0.05);
+        genome.behavior.max_lifespan_factor = 2.35 + self.rng.random_range(-0.18..0.22);
+        genome.behavior.reproduction_rate = 0.68 + self.rng.random_range(-0.05..0.08);
         genome.behavior.learning_rate = 0.0;
-        genome.behavior.pheromone_sensitivity = 0.38 + self.rng.random_range(-0.08..0.10);
-        genome.complexity = 0.04 + self.rng.random_range(-0.02..0.04);
+        genome.behavior.pheromone_sensitivity = 0.58 + self.rng.random_range(-0.08..0.10);
+        genome.complexity = 0.06 + self.rng.random_range(-0.02..0.04);
         genome
     }
 
@@ -330,16 +364,16 @@ impl super::AquariumSim {
         genome.art.body_elongation = 0.62 + self.rng.random_range(-0.08..0.08);
         genome.art.body_height_ratio = 0.34 + self.rng.random_range(-0.08..0.08);
         genome.art.pattern_density = 0.18 + self.rng.random_range(-0.04..0.08);
-        genome.behavior.aggression = 0.05 + self.rng.random_range(0.0..0.03);
-        genome.behavior.hunting_instinct = 0.08 + self.rng.random_range(0.0..0.05);
-        genome.behavior.mouth_size = 0.68 + self.rng.random_range(-0.05..0.06);
-        genome.behavior.speed_factor = 1.18 + self.rng.random_range(-0.08..0.10);
-        genome.behavior.metabolism_factor = 0.78 + self.rng.random_range(-0.05..0.06);
-        genome.behavior.max_lifespan_factor = 1.74 + self.rng.random_range(-0.14..0.20);
-        genome.behavior.reproduction_rate = 0.48 + self.rng.random_range(-0.05..0.08);
+        genome.behavior.aggression = 0.04 + self.rng.random_range(0.0..0.03);
+        genome.behavior.hunting_instinct = 0.10 + self.rng.random_range(0.0..0.05);
+        genome.behavior.mouth_size = 0.60 + self.rng.random_range(-0.05..0.06);
+        genome.behavior.speed_factor = 1.12 + self.rng.random_range(-0.08..0.10);
+        genome.behavior.metabolism_factor = 0.72 + self.rng.random_range(-0.05..0.06);
+        genome.behavior.max_lifespan_factor = 1.90 + self.rng.random_range(-0.14..0.20);
+        genome.behavior.reproduction_rate = 0.60 + self.rng.random_range(-0.05..0.08);
         genome.behavior.learning_rate = 0.0;
-        genome.behavior.pheromone_sensitivity = 0.22 + self.rng.random_range(-0.06..0.08);
-        genome.complexity = 0.15 + self.rng.random_range(-0.04..0.05);
+        genome.behavior.pheromone_sensitivity = 0.30 + self.rng.random_range(-0.06..0.08);
+        genome.complexity = 0.16 + self.rng.random_range(-0.03..0.03);
         genome
     }
 
@@ -535,6 +569,7 @@ impl super::AquariumSim {
         let _ = self
             .world
             .insert(entity, (appearance, bbox, AnimationState::new(0.8)));
+        self.anchor_rooted_macrophyte(entity);
     }
 
     fn initialize_founder_consumer(
@@ -549,10 +584,17 @@ impl super::AquariumSim {
             (physics, genome)
         };
         let threshold = ecosystem::consumer_reproductive_threshold(&physics, &genome);
-        let adult_slots = if total_founders >= 4 { 2 } else { 1 };
+        let adult_slots = if total_founders >= 5 {
+            2
+        } else if total_founders >= 3 {
+            1
+        } else {
+            1
+        };
 
         let (
             age_fraction,
+            founder_lifespan_scale,
             maturity_progress,
             reserve_buffer,
             reproductive_buffer,
@@ -560,42 +602,46 @@ impl super::AquariumSim {
             brood_cooldown,
             hunger,
             energy_fraction,
-        ): (f32, f32, f32, f32, f32, f32, f32, f32) = if cohort_index < adult_slots {
+        ): (f32, f32, f32, f32, f32, f32, f32, f32, f32) = if cohort_index < adult_slots {
             (
-                0.20 + self.rng.random_range(0.0..0.08),
+                0.26 + self.rng.random_range(0.0..0.08),
+                0.36 + self.rng.random_range(0.0..0.04),
                 1.0,
-                0.76 + self.rng.random_range(0.0..0.08),
-                threshold * (0.72 + self.rng.random_range(0.0..0.12)),
-                0.10 + self.rng.random_range(0.0..0.04),
-                4.0 + self.rng.random_range(0.0..8.0),
-                0.36 + self.rng.random_range(0.0..0.08),
-                0.92 + self.rng.random_range(0.0..0.04),
+                0.72 + self.rng.random_range(0.0..0.08),
+                threshold * (0.46 + self.rng.random_range(0.0..0.16)),
+                0.10 + self.rng.random_range(0.0..0.05),
+                12.0 + self.rng.random_range(0.0..16.0),
+                0.34 + self.rng.random_range(0.0..0.08),
+                0.82 + self.rng.random_range(0.0..0.06),
             )
-        } else if cohort_index < adult_slots + 2 {
+        } else if cohort_index < adult_slots + 3 {
             (
                 0.12 + self.rng.random_range(0.0..0.08),
-                0.72 + self.rng.random_range(0.0..0.16),
-                0.60 + self.rng.random_range(0.0..0.08),
-                threshold * (0.28 + self.rng.random_range(0.0..0.10)),
-                0.06 + self.rng.random_range(0.0..0.03),
-                6.0 + self.rng.random_range(0.0..10.0),
-                0.44 + self.rng.random_range(0.0..0.08),
-                0.86 + self.rng.random_range(0.0..0.04),
+                0.50 + self.rng.random_range(0.0..0.06),
+                0.54 + self.rng.random_range(0.0..0.18),
+                0.48 + self.rng.random_range(0.0..0.10),
+                threshold * (0.14 + self.rng.random_range(0.0..0.10)),
+                0.05 + self.rng.random_range(0.0..0.04),
+                8.0 + self.rng.random_range(0.0..12.0),
+                0.42 + self.rng.random_range(0.0..0.10),
+                0.74 + self.rng.random_range(0.0..0.08),
             )
         } else {
             (
-                0.03 + self.rng.random_range(0.0..0.06),
-                0.24 + self.rng.random_range(0.0..0.14),
-                0.40 + self.rng.random_range(0.0..0.08),
-                0.0,
-                0.01 + self.rng.random_range(0.0..0.02),
-                6.0 + self.rng.random_range(0.0..12.0),
-                0.56 + self.rng.random_range(0.0..0.08),
-                0.82 + self.rng.random_range(0.0..0.04),
+                0.02 + self.rng.random_range(0.0..0.04),
+                0.78 + self.rng.random_range(0.0..0.08),
+                0.16 + self.rng.random_range(0.0..0.14),
+                0.30 + self.rng.random_range(0.0..0.10),
+                threshold * (0.02 + self.rng.random_range(0.0..0.04)),
+                0.02 + self.rng.random_range(0.0..0.03),
+                6.0 + self.rng.random_range(0.0..10.0),
+                0.54 + self.rng.random_range(0.0..0.10),
+                0.68 + self.rng.random_range(0.0..0.08),
             )
         };
 
         if let Ok(mut age) = self.world.get::<&mut Age>(entity) {
+            age.max_ticks = ((age.max_ticks as f32) * founder_lifespan_scale).round() as u64;
             age.ticks = ((age.max_ticks as f32) * age_fraction).round() as u64;
         }
         if let Ok(mut state) = self.world.get::<&mut ConsumerState>(entity) {
@@ -611,7 +657,7 @@ impl super::AquariumSim {
             needs.hunger = hunger;
         }
         if let Ok(mut energy) = self.world.get::<&mut Energy>(entity) {
-            energy.current = energy.max * energy_fraction.min(0.92);
+            energy.current = energy.max * energy_fraction.min(0.96);
         }
         if let Ok(mut vel) = self.world.get::<&mut Velocity>(entity) {
             // Simulation assumption: default consumer founders start with only
@@ -634,20 +680,18 @@ impl super::AquariumSim {
 
         let mut seeded = 0usize;
         let mut attempts = 0usize;
-        let producer_rows = [th * 0.16, th * 0.28, th * 0.42, th * 0.56];
+        let producer_y = self.rooted_settlement_y();
         while seeded < target_producers && attempts < target_producers * 12 {
             attempts += 1;
             let frac = (seeded as f32 + 0.5) / target_producers.max(1) as f32;
             let x =
                 (3.0 + frac * (tw - 6.0) + self.rng.random_range(-1.2..1.2)).clamp(3.0, tw - 3.0);
-            let row = producer_rows[seeded % producer_rows.len()];
-            let y = (row + self.rng.random_range(-1.0..1.0)).clamp(th * 0.12, th * 0.68);
             let crowded = (&mut self.world.query::<(Entity, &ProducerGenome)>())
                 .into_iter()
                 .filter_map(|(entity, _)| self.world.get::<&Position>(entity).ok())
                 .any(|pos| {
                     let dx = pos.x - x;
-                    let dy = pos.y - y;
+                    let dy = pos.y - producer_y;
                     dx * dx + dy * dy < spacing * spacing
                 });
             if crowded {
@@ -660,7 +704,7 @@ impl super::AquariumSim {
                 ProducerOrigin::Broadcast
             };
             let entity = self.spawn_producer_with_propagule(
-                Position { x, y },
+                Position { x, y: producer_y },
                 genome.clone(),
                 Some(founder_kind),
             );
@@ -707,10 +751,11 @@ impl super::AquariumSim {
                 .cloned()
                 .unwrap_or(Position {
                     x: tw * 0.5,
-                    y: th * 0.32,
+                    y: self.rooted_settlement_y(),
                 });
             let x = (anchor.x + self.rng.random_range(-1.6..1.6)).clamp(2.0, tw - 2.0);
-            let y = (anchor.y + self.rng.random_range(-1.0..1.0)).clamp(2.0, th - 2.0);
+            let y = (self.rooted_settlement_y() + self.rng.random_range(-1.0..0.4))
+                .clamp(th - 4.0, th - 2.0);
             self.spawn_detritus(x, y, detritus_packet_energy);
             remaining_detritus_energy -= detritus_packet_energy;
         }
@@ -734,10 +779,18 @@ impl super::AquariumSim {
                 .cloned()
                 .unwrap_or(Position {
                     x: tw * 0.5,
-                    y: th * 0.32,
+                    y: self.rooted_settlement_y(),
                 });
             let x = (anchor.x + self.rng.random_range(-1.0..1.0)).clamp(3.0, tw - 3.0);
-            let y = (anchor.y + self.rng.random_range(-0.8..0.8)).clamp(th * 0.12, th * 0.72);
+            let (band_min, band_max) = match i % 3 {
+                0 => (th * 0.58, th * 0.76),
+                1 => (th * 0.72, th * 0.88),
+                _ => (th * 0.28, th * 0.56),
+            };
+            let y = self
+                .rng
+                .random_range(band_min..band_max)
+                .clamp(3.0, th - 3.0);
             let entity = self.spawn_from_genome(genome, x, y);
             self.initialize_founder_consumer(entity, i, max_founders);
             seeded_consumers.push(entity);

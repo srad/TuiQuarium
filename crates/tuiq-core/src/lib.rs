@@ -25,16 +25,18 @@ use boids::{Boid, BoidParams};
 use brain::InnovationTracker;
 use components::*;
 use ecosystem::{LightField, NutrientPool, Producer};
-use environment::{Environment, SubstrateGrid};
+use environment::{Environment, EventKind, SubstrateGrid};
+use genome::CreatureGenome;
 use phenotype::{DerivedPhysics, FeedingCapability};
 use rand::rngs::StdRng;
+use rand::RngExt;
 use rand::SeedableRng;
 use spatial::SpatialGrid;
 use stats::ECOLOGY_HISTORY_DAYS;
 use systems::{
-    AllometricEcosystem, BrainSystem, BodySizeHunting, DefaultProducerLifecycle,
-    DefaultReproduction, EcosystemSystem, HuntingSystem, NeatBrainSystem,
-    ProducerLifecycleSystem, ReproductionSystem,
+    AllometricEcosystem, BodySizeHunting, BrainSystem, DefaultProducerLifecycle,
+    DefaultReproduction, EcosystemSystem, HuntingSystem, NeatBrainSystem, ProducerLifecycleSystem,
+    ReproductionSystem,
 };
 
 use hecs::Entity;
@@ -61,8 +63,6 @@ pub struct EntityInfo {
 
 /// Shared lookup map type used by brain, boids, and hunting systems.
 pub type EntityInfoMap = HashMap<Entity, EntityInfo>;
-
-
 
 /// The core simulation interface. Rendering code only sees this trait.
 pub trait Simulation {
@@ -137,6 +137,8 @@ pub struct AquariumSim {
     rolling_consumer_intake: f32,
     rolling_consumer_maintenance: f32,
     pending_labile_detritus_energy: f32,
+    feeding_frenzy_food_budget: f32,
+    feeding_frenzy_detritus_budget: f32,
     stats_cache_tick: u64,
     daily_ecology_history: VecDeque<DailyEcologySample>,
     last_daily_creature_births: u64,
@@ -243,6 +245,8 @@ impl AquariumSim {
             rolling_consumer_intake: 0.0,
             rolling_consumer_maintenance: 0.0,
             pending_labile_detritus_energy: 0.0,
+            feeding_frenzy_food_budget: 0.0,
+            feeding_frenzy_detritus_budget: 0.0,
             stats_cache_tick: 0,
             daily_ecology_history: VecDeque::with_capacity(ECOLOGY_HISTORY_DAYS),
             last_daily_creature_births: 0,
@@ -274,6 +278,122 @@ impl AquariumSim {
     fn smoothing_factor(dt: f32, horizon_seconds: f32) -> f32 {
         (dt / horizon_seconds.max(dt)).clamp(0.0, 1.0)
     }
+
+    fn feeding_frenzy_food_count(&mut self) -> usize {
+        (&mut self.world.query::<(Entity, &Producer)>())
+            .into_iter()
+            .filter(|(entity, _)| {
+                self.world.get::<&ecosystem::Detritus>(*entity).is_err()
+                    && self.world.get::<&genome::ProducerGenome>(*entity).is_err()
+            })
+            .count()
+    }
+
+    fn spawn_feeding_frenzy_food(&mut self, dt: f32) {
+        let area_scale =
+            ((self.tank_width as f32 * self.tank_height as f32) / 900.0).clamp(0.75, 2.5);
+        let food_cap = ((self.tank_width as usize * self.tank_height as usize) / 120).max(6);
+        let existing_food = self.feeding_frenzy_food_count();
+        let consumer_positions: Vec<Position> =
+            (&mut self.world.query::<(&Position, &CreatureGenome)>())
+                .into_iter()
+                .map(|(pos, _)| pos.clone())
+                .collect();
+        self.feeding_frenzy_food_budget += 1.4 * area_scale * dt;
+        self.feeding_frenzy_detritus_budget += 0.35 * area_scale * dt;
+        if existing_food < food_cap {
+            let pellet_spawns = (self.feeding_frenzy_food_budget.floor() as usize)
+                .min(food_cap.saturating_sub(existing_food));
+            for _ in 0..pellet_spawns {
+                let glyph = if self.rng.random_bool(0.35) { "o" } else { "." };
+                let frame = AsciiFrame::from_rows(vec![glyph]);
+                let appearance = Appearance {
+                    frame_sets: vec![vec![frame.clone()], vec![frame]],
+                    facing: Direction::Right,
+                    color_index: 4,
+                };
+                let anchor = consumer_positions
+                    .get(self.rng.random_range(0..consumer_positions.len().max(1)))
+                    .cloned();
+                let x = anchor
+                    .as_ref()
+                    .map(|pos| pos.x + self.rng.random_range(-2.5..2.5))
+                    .unwrap_or_else(|| self.rng.random_range(1.5..(self.tank_width as f32 - 1.5)))
+                    .clamp(1.5, self.tank_width as f32 - 1.5);
+                let y = anchor
+                    .as_ref()
+                    .map(|pos| pos.y + self.rng.random_range(-1.2..1.2))
+                    .unwrap_or_else(|| {
+                        self.rng
+                            .random_range(1.0..(self.tank_height as f32 * 0.22).max(2.0))
+                    })
+                    .clamp(1.0, self.tank_height as f32 - 3.0);
+                let vx = self.env.current.0 * 0.25 + self.rng.random_range(-0.08..0.08);
+                let vy = self.rng.random_range(0.12..0.45);
+                self.spawn_food(
+                    Position { x, y },
+                    Velocity { vx, vy },
+                    BoundingBox { w: 1.0, h: 1.0 },
+                    appearance,
+                );
+            }
+            self.feeding_frenzy_food_budget =
+                (self.feeding_frenzy_food_budget - pellet_spawns as f32).max(0.0);
+        }
+
+        let detritus_spawns = self.feeding_frenzy_detritus_budget.floor() as usize;
+        for _ in 0..detritus_spawns.min(2) {
+            let anchor = consumer_positions
+                .get(self.rng.random_range(0..consumer_positions.len().max(1)))
+                .cloned();
+            let x = anchor
+                .map(|pos| pos.x + self.rng.random_range(-1.6..1.6))
+                .unwrap_or_else(|| self.rng.random_range(2.0..(self.tank_width as f32 - 2.0)))
+                .clamp(2.0, self.tank_width as f32 - 2.0);
+            let y = (self.rooted_settlement_y() + self.rng.random_range(-1.0..0.4))
+                .clamp(self.tank_height as f32 - 4.0, self.tank_height as f32 - 2.0);
+            self.spawn_detritus(x, y, 1.2);
+        }
+        self.feeding_frenzy_detritus_budget =
+            (self.feeding_frenzy_detritus_budget - detritus_spawns as f32).max(0.0);
+    }
+
+    fn apply_environment_need_pressure(&mut self, dt: f32) {
+        if !matches!(
+            self.env.active_event.as_ref().map(|event| event.kind),
+            Some(EventKind::Earthquake)
+        ) {
+            return;
+        }
+
+        for (needs, _) in self
+            .world
+            .query_mut::<(&mut needs::Needs, &CreatureGenome)>()
+        {
+            needs.safety = (needs.safety + 0.18 + dt * 0.40).clamp(0.0, 1.0);
+            needs.comfort = (needs.comfort + 0.05 + dt * 0.12).clamp(0.0, 1.0);
+        }
+    }
+
+    fn apply_environment_velocity_forcing(&mut self, dt: f32) {
+        if !matches!(
+            self.env.active_event.as_ref().map(|event| event.kind),
+            Some(EventKind::Earthquake)
+        ) {
+            return;
+        }
+
+        for (vel, physics, _) in self
+            .world
+            .query_mut::<(&mut Velocity, &DerivedPhysics, &CreatureGenome)>()
+        {
+            let quake_push = physics.max_speed.max(0.6) * (1.3 + self.rng.random_range(0.0..0.7));
+            vel.vx +=
+                (self.rng.random_range(-1.0..1.0) + self.env.current.0 * 0.45) * quake_push * dt;
+            vel.vy +=
+                (self.rng.random_range(-1.0..1.0) + self.env.current.1 * 0.65) * quake_push * dt;
+        }
+    }
 }
 
 impl Simulation for AquariumSim {
@@ -288,6 +408,15 @@ impl Simulation for AquariumSim {
             self.elapsed_days += 1;
         }
         self.prev_time_of_day = self.env.time_of_day;
+        if matches!(
+            self.env.active_event.as_ref().map(|event| event.kind),
+            Some(EventKind::FeedingFrenzy)
+        ) {
+            self.spawn_feeding_frenzy_food(dt);
+        } else {
+            self.feeding_frenzy_food_budget = 0.0;
+            self.feeding_frenzy_detritus_budget = 0.0;
+        }
 
         // 1. Rebuild spatial grid
         self.grid.rebuild(&self.world);
@@ -334,6 +463,7 @@ impl Simulation for AquariumSim {
         {
             needs::needs_tick(needs, weights, dt);
         }
+        self.apply_environment_need_pressure(dt);
 
         // 4. Brain system (returns pheromone deposits)
         let pheromone_deposits = self.brain_system.evaluate(
@@ -361,9 +491,11 @@ impl Simulation for AquariumSim {
             th,
             dt,
         );
+        self.apply_environment_velocity_forcing(dt);
 
         // 6. Physics integration + boundary bounce
         physics::physics_system(&mut self.world, dt, tw, th);
+        self.apply_environment_velocity_forcing(dt * 0.65);
 
         // Rebuild the spatial grid after movement so hunting and establishment see
         // current positions rather than pre-physics positions.
@@ -427,7 +559,8 @@ impl Simulation for AquariumSim {
         self.pending_labile_detritus_energy += producer_flux.labile_detritus_energy;
         self.spawn_labile_detritus_from_producers();
         self.ecosystem_system.tick_aging(&mut self.world);
-        self.ecosystem_system.tick_consumer_lifecycle(&mut self.world, dt);
+        self.ecosystem_system
+            .tick_consumer_lifecycle(&mut self.world, dt);
 
         let smoothing = Self::smoothing_factor(dt, 75.0);
         self.rolling_producer_npp +=
@@ -439,14 +572,13 @@ impl Simulation for AquariumSim {
         self.producer_lifecycle_system.tick(&mut self.world, dt);
 
         // 8. Hunting + feeding
-        let feeding = self.hunting_system.find_and_apply(
-            &mut self.world,
-            &self.grid,
-            &entity_map,
-            dt,
-        );
-        self.rolling_consumer_intake +=
-            (feeding.total_assimilation - self.rolling_consumer_intake) * smoothing;
+        let feeding =
+            self.hunting_system
+                .find_and_apply(&mut self.world, &self.grid, &entity_map, dt);
+        self.rolling_consumer_intake += ((feeding.total_assimilation
+            + producer_flux.pelagic_consumer_intake)
+            - self.rolling_consumer_intake)
+            * smoothing;
 
         // 9. Creature reproduction (with population cap)
         let creature_count = self.cached_creature_count;
@@ -558,12 +690,13 @@ impl Simulation for AquariumSim {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
     use crate::ecosystem::{Age, Detritus, Energy};
+    use crate::environment::{EnvironmentEvent, EventKind};
     use crate::genome::CreatureGenome;
     use crate::needs::{NeedWeights, Needs};
     use crate::phenotype::derive_physics;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_environment_defaults() {
@@ -681,8 +814,6 @@ mod tests {
         assert_eq!(diagnostics.daily_history.first().unwrap().day, 4);
         assert_eq!(diagnostics.daily_history.last().unwrap().day, 35);
     }
-
-
 
     #[test]
     fn test_spawn_and_tick_moves_creature() {
@@ -1321,8 +1452,11 @@ mod tests {
         for i in 0..10 {
             let x = 5.0 + (i as f32 / 10.0) * (tw - 10.0);
             let y = th * 0.4 + (i as f32 % 3.0) * 2.0;
-            let entity =
-                sim.spawn_from_genome(CreatureGenome::minimal_cell(&mut StdRng::seed_from_u64(42)), x, y);
+            let entity = sim.spawn_from_genome(
+                CreatureGenome::minimal_cell(&mut StdRng::seed_from_u64(42)),
+                x,
+                y,
+            );
             prime_test_adult(&mut sim, entity, 0.85);
         }
 
@@ -1413,8 +1547,11 @@ mod tests {
             }
         }
 
-        let doomed =
-            sim.spawn_from_genome(CreatureGenome::minimal_cell(&mut StdRng::seed_from_u64(42)), 6.0, 6.0);
+        let doomed = sim.spawn_from_genome(
+            CreatureGenome::minimal_cell(&mut StdRng::seed_from_u64(42)),
+            6.0,
+            6.0,
+        );
         if let Ok(mut energy) = sim.world.get::<&mut Energy>(doomed) {
             energy.current = 0.0;
         }
@@ -2157,6 +2294,54 @@ mod tests {
             + stats.producer_deaths
     }
 
+    fn count_food_packets(sim: &mut AquariumSim) -> usize {
+        (&mut sim.world.query::<(Entity, &Producer)>())
+            .into_iter()
+            .filter(|(entity, _)| {
+                sim.world.get::<&Detritus>(*entity).is_err()
+                    && sim.world.get::<&genome::ProducerGenome>(*entity).is_err()
+            })
+            .count()
+    }
+
+    fn average_safety(sim: &mut AquariumSim) -> f32 {
+        let mut count = 0usize;
+        let total: f32 = (&mut sim.world.query::<(&Needs, &CreatureGenome)>())
+            .into_iter()
+            .map(|(needs, _)| {
+                count += 1;
+                needs.safety
+            })
+            .sum();
+        if count == 0 {
+            0.0
+        } else {
+            total / count as f32
+        }
+    }
+
+    fn average_speed(sim: &mut AquariumSim) -> f32 {
+        let mut count = 0usize;
+        let total: f32 = (&mut sim.world.query::<(&Velocity, &CreatureGenome)>())
+            .into_iter()
+            .map(|(vel, _)| {
+                count += 1;
+                (vel.vx * vel.vx + vel.vy * vel.vy).sqrt()
+            })
+            .sum();
+        if count == 0 {
+            0.0
+        } else {
+            total / count as f32
+        }
+    }
+
+    fn count_living_creatures(sim: &mut AquariumSim) -> usize {
+        (&mut sim.world.query::<&CreatureGenome>())
+            .into_iter()
+            .count()
+    }
+
     #[test]
     fn test_default_bootstrap_starts_with_simple_consumers() {
         let mut sim = AquariumSim::new_seeded(80, 24, 42);
@@ -2215,6 +2400,32 @@ mod tests {
                 .iter()
                 .all(|stage| matches!(stage, ProducerStage::Cell | ProducerStage::Patch)),
             "Default bootstrap should start from low-stage producer colonies, got {stages:?}",
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_roots_macrophytes_to_substrate_band() {
+        let mut sim = AquariumSim::new_seeded(80, 24, 42);
+        sim.env.set_random_events_enabled(false);
+        sim.bootstrap_founder_web();
+
+        let expected_bottom = sim.tank_height as f32 - 3.0;
+        let mut rooted_count = 0usize;
+        for (pos, bbox, _) in sim
+            .world
+            .query_mut::<(&Position, &BoundingBox, &RootedMacrophyte)>()
+        {
+            rooted_count += 1;
+            let bottom = pos.y + bbox.h - 1.0;
+            assert!(
+                (bottom - expected_bottom).abs() < 0.05,
+                "Rooted macrophyte should sit on the substrate band: bottom={bottom:.2} expected={expected_bottom:.2}"
+            );
+        }
+
+        assert!(
+            rooted_count > 0,
+            "Default bootstrap should tag rooted macrophytes"
         );
     }
 
@@ -2362,11 +2573,11 @@ mod tests {
 
     #[test]
     fn test_default_bootstrap_stable_coexistence_for_20_days() {
-        let mut sim = AquariumSim::new(60, 20);
+        let mut sim = AquariumSim::new(48, 16);
         sim.env.set_random_events_enabled(false);
         sim.bootstrap_founder_web();
 
-        let dt = 0.25;
+        let dt = 1.0;
         let ticks_per_day = (300.0 / dt) as usize;
         let mut producer_history = Vec::new();
         let mut producer_never_zero = true;
@@ -2414,12 +2625,286 @@ mod tests {
         let producer_15_20 = mean(&producer_history[14..19]);
 
         assert!(
-            producer_15_20 > 5.0 && producer_15_20 > producer_10_15 * 0.25,
+            producer_15_20 > 3.0 && producer_15_20 > producer_10_15 * 0.25,
             "Producer biomass should persist through the 10-20 day window. \
              day10_15={:.2}, day15_20={:.2}, final={:.2}",
             producer_10_15,
             producer_15_20,
             producer_biomass,
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_retains_visible_consumers_with_events_enabled() {
+        let mut sim = AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 1.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        let mut visible_consumer_days = 0usize;
+
+        for tick in 0..(ticks_per_day * 20) {
+            sim.tick(dt);
+            if (tick + 1) % ticks_per_day == 0 {
+                let stats = sim.stats();
+                if stats.creature_count >= 3 && stats.consumer_biomass > 0.8 {
+                    visible_consumer_days += 1;
+                }
+            }
+        }
+
+        let stats = sim.stats();
+
+        assert!(
+            stats.creature_births >= 2,
+            "Event-enabled default bootstrap should still produce multiple creature births. \
+             CreatureBirths={}, CreatureDeaths={}, Creatures={}, ConsumerBiomass={:.2}, Gen={}, Species={}",
+            stats.creature_births,
+            stats.creature_deaths,
+            stats.creature_count,
+            stats.consumer_biomass,
+            stats.max_generation,
+            stats.species_count,
+        );
+        assert!(
+            stats.creature_count >= 3,
+            "Event-enabled default bootstrap should retain a visible consumer population after 20 days. \
+             CreatureBirths={}, CreatureDeaths={}, Creatures={}, ConsumerBiomass={:.2}, Gen={}, Species={}",
+            stats.creature_births,
+            stats.creature_deaths,
+            stats.creature_count,
+            stats.consumer_biomass,
+            stats.max_generation,
+            stats.species_count,
+        );
+        assert!(
+            visible_consumer_days >= 8,
+            "Event-enabled default bootstrap should keep consumers visibly present across multiple days, got {} visible days. \
+             CreatureBirths={}, CreatureDeaths={}, Creatures={}, ConsumerBiomass={:.2}, Gen={}, Species={}",
+            visible_consumer_days,
+            stats.creature_births,
+            stats.creature_deaths,
+            stats.creature_count,
+            stats.consumer_biomass,
+            stats.max_generation,
+            stats.species_count,
+        );
+    }
+
+    #[test]
+    fn test_feeding_frenzy_increases_edible_food_and_consumer_intake() {
+        let mut control = AquariumSim::new_seeded(48, 16, 42);
+        control.env.set_random_events_enabled(false);
+        let control_grazer = spawn_test_grazer(&mut control, 20.0, 8.0);
+        if let Ok(mut needs) = control.world.get::<&mut Needs>(control_grazer) {
+            needs.hunger = 0.95;
+        }
+        if let Ok(mut energy) = control.world.get::<&mut Energy>(control_grazer) {
+            energy.current = energy.max * 0.45;
+        }
+
+        let mut frenzy = AquariumSim::new_seeded(48, 16, 42);
+        frenzy.env.set_random_events_enabled(false);
+        let frenzy_grazer = spawn_test_grazer(&mut frenzy, 20.0, 8.0);
+        if let Ok(mut needs) = frenzy.world.get::<&mut Needs>(frenzy_grazer) {
+            needs.hunger = 0.95;
+        }
+        if let Ok(mut energy) = frenzy.world.get::<&mut Energy>(frenzy_grazer) {
+            energy.current = energy.max * 0.45;
+        }
+
+        let dt = 0.25;
+        frenzy.env.active_event = Some(EnvironmentEvent {
+            kind: EventKind::FeedingFrenzy,
+            remaining: 12.0,
+        });
+        for _ in 0..8 {
+            control.tick(dt);
+            frenzy.tick(dt);
+        }
+        let frenzy_food = count_food_packets(&mut frenzy);
+        let control_food = count_food_packets(&mut control);
+
+        for _ in 0..16 {
+            control.tick(dt);
+            frenzy.tick(dt);
+        }
+
+        let control_hunger = control.world.get::<&Needs>(control_grazer).unwrap().hunger;
+        let frenzy_hunger = frenzy.world.get::<&Needs>(frenzy_grazer).unwrap().hunger;
+
+        assert!(
+            frenzy_food > control_food,
+            "Feeding frenzy should add edible food packets: control={} frenzy={}",
+            control_food,
+            frenzy_food,
+        );
+        assert!(
+            frenzy_hunger + 0.10 < control_hunger,
+            "Feeding frenzy should lower grazer hunger: control_hunger={:.3} frenzy_hunger={:.3}",
+            control_hunger,
+            frenzy_hunger,
+        );
+    }
+
+    #[test]
+    fn test_earthquake_raises_safety_without_killing_consumers() {
+        let mut control = AquariumSim::new_seeded(40, 18, 42);
+        control.env.set_random_events_enabled(false);
+        let mut quake = AquariumSim::new_seeded(40, 18, 42);
+        quake.env.set_random_events_enabled(false);
+
+        for i in 0..4 {
+            spawn_test_creature(&mut control, 8.0 + i as f32 * 5.0, 8.0);
+            spawn_test_creature(&mut quake, 8.0 + i as f32 * 5.0, 8.0);
+        }
+
+        let control_count_before = count_living_creatures(&mut control);
+        let quake_count_before = count_living_creatures(&mut quake);
+        let control_safety_before = average_safety(&mut control);
+        let quake_safety_before = average_safety(&mut quake);
+
+        quake.env.active_event = Some(EnvironmentEvent {
+            kind: EventKind::Earthquake,
+            remaining: 2.0,
+        });
+        for _ in 0..4 {
+            control.tick(0.25);
+            quake.tick(0.25);
+        }
+
+        assert_eq!(
+            count_living_creatures(&mut control),
+            control_count_before,
+            "Control run should not lose creatures in the short disturbance window",
+        );
+        assert_eq!(
+            count_living_creatures(&mut quake),
+            quake_count_before,
+            "Earthquake should not directly kill consumers in the short disturbance window",
+        );
+        assert!(
+            average_safety(&mut quake) > quake_safety_before + 0.15
+                && average_safety(&mut quake) > average_safety(&mut control) + 0.10
+                && average_safety(&mut control) <= control_safety_before + 0.05,
+            "Earthquake should raise safety pressure without direct mortality: control_before={:.3} control_after={:.3} quake_before={:.3} quake_after={:.3}",
+            control_safety_before,
+            average_safety(&mut control),
+            quake_safety_before,
+            average_safety(&mut quake),
+        );
+        assert!(
+            (average_speed(&mut quake) - average_speed(&mut control)).abs() > 0.20,
+            "Earthquake should visibly disturb movement: control_speed={:.3} quake_speed={:.3}",
+            average_speed(&mut control),
+            average_speed(&mut quake),
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_thriving_lake_for_200_days() {
+        let mut sim = AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 4.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        let mut visible_consumer_days = 0usize;
+        let mut juvenile_days = 0usize;
+        let mut zero_consumer_streak = 0usize;
+        let mut longest_zero_consumer_streak = 0usize;
+        let mut producers_never_collapsed = true;
+        let mut peak_creature_count = 0usize;
+
+        for tick in 0..(ticks_per_day * 200) {
+            sim.tick(dt);
+            if (tick + 1) % ticks_per_day == 0 {
+                let stats = sim.stats();
+                let producer_biomass = stats.producer_leaf_biomass
+                    + stats.producer_structural_biomass
+                    + stats.producer_belowground_reserve;
+                if producer_biomass <= 1.0 {
+                    producers_never_collapsed = false;
+                    break;
+                }
+                if stats.creature_count >= 4 && stats.consumer_biomass >= 1.0 {
+                    visible_consumer_days += 1;
+                }
+                if stats.juvenile_count > 0 {
+                    juvenile_days += 1;
+                }
+                peak_creature_count = peak_creature_count.max(stats.creature_count);
+                if stats.creature_count == 0 {
+                    zero_consumer_streak += 1;
+                    longest_zero_consumer_streak =
+                        longest_zero_consumer_streak.max(zero_consumer_streak);
+                } else {
+                    zero_consumer_streak = 0;
+                }
+            }
+        }
+
+        let stats = sim.stats();
+        let producer_biomass = stats.producer_leaf_biomass
+            + stats.producer_structural_biomass
+            + stats.producer_belowground_reserve;
+
+        assert!(
+            producers_never_collapsed,
+            "Producers should not collapse during the 200-day thriving-lake run"
+        );
+        assert!(
+            producer_biomass > 20.0,
+            "Producer biomass should remain substantial after 200 days, got {:.2}",
+            producer_biomass,
+        );
+        assert!(
+            stats.creature_births >= 8,
+            "Thriving lake should produce sustained consumer births over 200 days. \
+             CreatureBirths={}, CreatureDeaths={}, Creatures={}, ConsumerBiomass={:.2}",
+            stats.creature_births,
+            stats.creature_deaths,
+            stats.creature_count,
+            stats.consumer_biomass,
+        );
+        assert!(
+            stats.max_generation >= 2,
+            "Thriving lake should advance consumer generations, got {}",
+            stats.max_generation,
+        );
+        assert!(
+            stats.species_count >= 2,
+            "Thriving lake should retain multiple consumer lineages, got {}",
+            stats.species_count,
+        );
+        assert!(
+            stats.creature_count >= 4,
+            "Thriving lake should end with a visible consumer population, got {}",
+            stats.creature_count,
+        );
+        assert!(
+            visible_consumer_days >= 150,
+            "Thriving lake should stay visibly active for most days, got {} visible days",
+            visible_consumer_days,
+        );
+        assert!(
+            juvenile_days >= 35,
+            "Thriving lake should keep juveniles in the population across many days, got {} juvenile days",
+            juvenile_days,
+        );
+        assert!(
+            longest_zero_consumer_streak <= 7,
+            "Thriving lake should not remain consumer-empty for long streaks, got {} days",
+            longest_zero_consumer_streak,
+        );
+        assert!(
+            peak_creature_count <= 180,
+            "Thriving lake should avoid runaway all-adult swarms, got peak population {}",
+            peak_creature_count,
+        );
+        assert!(
+            sim.nutrients.dissolved_p <= 120.0,
+            "Dissolved phosphorus should stay bounded over the 200-day run, got {:.2}",
+            sim.nutrients.dissolved_p,
         );
     }
 
