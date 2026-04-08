@@ -2,9 +2,10 @@
 
 use rand::Rng;
 use rand::RngExt;
+use serde::{Deserialize, Serialize};
 
 /// Global environment state for the aquarium.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Environment {
     /// Time of day in hours (0.0–24.0).
     pub time_of_day: f32,
@@ -40,7 +41,7 @@ impl Default for Environment {
 }
 
 /// A random environmental event that temporarily changes conditions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvironmentEvent {
     pub kind: EventKind,
     /// Remaining duration in seconds.
@@ -48,7 +49,7 @@ pub struct EnvironmentEvent {
 }
 
 /// Types of random events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventKind {
     /// Plants grow faster, visibility drops.
     AlgaeBloom,
@@ -207,7 +208,7 @@ impl Environment {
 // ---------------------------------------------------------------------------
 
 /// Substrate type at a bottom cell. Affects producer establishment and nutrient release.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Substrate {
     /// Default substrate — neutral modifiers.
     Sandy,
@@ -218,7 +219,7 @@ pub enum Substrate {
 }
 
 /// A 1-D substrate map across the tank bottom (one value per column).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstrateGrid {
     cols: Vec<Substrate>,
 }

@@ -16,11 +16,12 @@
 
 use rand::Rng;
 use rand::RngExt;
+use serde::{Deserialize, Serialize};
 
 use crate::brain::BrainGenome;
 
 /// The complete genome for a creature — drives appearance, animation, behavior, and ecology.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatureGenome {
     pub art: ArtGenome,
     pub anim: AnimGenome,
@@ -37,7 +38,7 @@ pub struct CreatureGenome {
 // Art genome — controls visual appearance and body morphology
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtGenome {
     /// Body elongation: 0.0 = round, 1.0 = elongated/slim.
     pub body_elongation: f32,
@@ -106,7 +107,7 @@ impl ArtGenome {
 // Animation genome — controls movement style
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimGenome {
     pub swim_speed: f32,     // 0.3–2.0 frames/sec multiplier
     pub tail_amplitude: f32, // 0.0–1.0 how wide rear protrusion swishes
@@ -129,7 +130,7 @@ impl AnimGenome {
 // Behavior genome — controls personality and ecology
 // ============================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviorGenome {
     pub schooling_affinity: f32,  // 0.0–1.0
     pub aggression: f32,          // 0.0–1.0
@@ -271,7 +272,7 @@ impl CreatureGenome {
 // ============================================================
 
 /// The complete genome for an aquatic producer colony — drives appearance and physiology.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProducerGenome {
     // ── Morphology (L-system parameters) ───────────────────────
     /// Support density / attachment strength proxy.

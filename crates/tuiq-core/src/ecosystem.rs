@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use hecs::{Entity, World};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::calibration::EcologyCalibration;
 use crate::components::{Position, Velocity};
@@ -16,7 +17,7 @@ use crate::spatial::SpatialGrid;
 use crate::EntityInfoMap;
 
 /// Energy state for a living creature.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Energy {
     pub current: f32,
     pub max: f32,
@@ -56,7 +57,7 @@ fn saturation_limit(resource: f32, half_sat: f32) -> f32 {
 }
 
 /// Age of a creature in simulation ticks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Age {
     pub ticks: u64,
     pub max_ticks: u64,
@@ -64,12 +65,12 @@ pub struct Age {
 
 /// Marker component for producer entities (plants, food pellets).
 /// Creatures do NOT have this — their feeding behavior is determined by FeedingCapability.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Producer;
 
 /// Marker component for detritus entities (dead creature remains).
 /// Detritus is a producer that decays faster and can be grazed.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Detritus;
 
 /// Tank-wide dissolved nutrient state and suspended phytoplankton load.
@@ -77,7 +78,7 @@ pub struct Detritus;
 /// Research note: submerged macrophytes are frequently co-limited by nitrogen and
 /// phosphorus rather than by light alone (Mebane et al., 2021), and nutrient-driven
 /// phytoplankton/periphyton shading is a major indirect stressor (Yu et al., 2018).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NutrientPool {
     pub dissolved_n: f32,
     pub dissolved_p: f32,
@@ -100,22 +101,29 @@ impl Default for NutrientPool {
 
 impl NutrientPool {
     pub fn tick(&mut self, env: &Environment, dt: f32, calibration: &EcologyCalibration) {
+        let n_deficit = ((8.0 - self.dissolved_n) / 8.0).clamp(0.0, 1.0);
+        let p_deficit = ((1.5 - self.dissolved_p) / 1.5).clamp(0.0, 1.0);
+
         // Research note: shallow aquatic systems can recycle a meaningful share
         // of benthic nutrients back into the water column on ecological
         // timescales, so the founder-web baseline should not behave like a
         // near-closed sediment sink from the first day.
-        let release_n = (self.sediment_n * 0.0045 * dt).min(self.sediment_n);
-        let release_p = (self.sediment_p * 0.005 * dt).min(self.sediment_p); // increased from 0.0028
+        let release_n_rate = 0.0018 + 0.0032 * n_deficit;
+        let release_p_rate = 0.0010 + 0.0022 * p_deficit;
+        let release_n = (self.sediment_n * release_n_rate * dt).min(self.sediment_n);
+        let release_p = (self.sediment_p * release_p_rate * dt).min(self.sediment_p);
         self.sediment_n -= release_n;
         self.sediment_p -= release_p;
         self.dissolved_n += release_n;
         self.dissolved_p += release_p;
+        self.dissolved_n += (0.004 + 0.028 * n_deficit) * dt;
+        self.dissolved_p += (0.0002 + 0.0022 * p_deficit) * dt;
 
         // Nitrogen fixation analogue: cyanobacteria-like background process
         // slowly restores dissolved N when it drops below a critical threshold.
         // This prevents irreversible ecosystem crashes from nitrogen depletion.
-        const N_FIXATION_THRESHOLD: f32 = 8.0;
-        const N_FIXATION_RATE: f32 = 0.15; // units per second when fully active
+        const N_FIXATION_THRESHOLD: f32 = 10.0;
+        const N_FIXATION_RATE: f32 = 0.24; // units per second when fully active
         if self.dissolved_n < N_FIXATION_THRESHOLD {
             let deficit_ratio = 1.0 - self.dissolved_n / N_FIXATION_THRESHOLD;
             self.dissolved_n += N_FIXATION_RATE * deficit_ratio * dt;
@@ -124,35 +132,30 @@ impl NutrientPool {
         // Research note: shallow lakes do export/bury phosphorus under high-load
         // conditions via precipitation, burial, and outflow. Without a soft cap,
         // the simplified loop drifts into unrealistically extreme dissolved P.
-        const DISSOLVED_P_TARGET: f32 = 24.0;
+        const DISSOLVED_P_TARGET: f32 = 3.5;
         if self.dissolved_p > DISSOLVED_P_TARGET {
             let excess_p = self.dissolved_p - DISSOLVED_P_TARGET;
-            let burial_p = excess_p * 0.0035 * dt;
-            let export_p = excess_p * 0.0015 * dt;
+            let burial_p = excess_p * 0.0075 * dt;
+            let export_p = excess_p * 0.0030 * dt;
             self.dissolved_p = (self.dissolved_p - burial_p - export_p).max(0.0);
             self.sediment_p += burial_p;
         }
 
-        // Nutrient floor: dissolved pools cannot drop below 5% of initial levels.
-        // This represents geological and atmospheric inputs that the simplified
-        // model cannot otherwise capture.
-        const MIN_DISSOLVED_N: f32 = 3.6; // 5% of initial 72.0
-        const MIN_DISSOLVED_P: f32 = 0.6; // 5% of initial 12.0
-        self.dissolved_n = self.dissolved_n.max(MIN_DISSOLVED_N);
-        self.dissolved_p = self.dissolved_p.max(MIN_DISSOLVED_P);
+        self.dissolved_n = self.dissolved_n.max(0.0);
+        self.dissolved_p = self.dissolved_p.max(0.0);
 
         let nutrient_pressure = (self.dissolved_n / 95.0 + self.dissolved_p / 18.0) * 0.5;
         let bloom_target = if matches!(
             env.active_event.as_ref().map(|e| e.kind),
             Some(crate::environment::EventKind::AlgaeBloom)
         ) {
-            0.55
+            0.38
         } else {
-            0.10 + nutrient_pressure.clamp(0.0, 0.32)
+            0.015 + nutrient_pressure.clamp(0.0, 1.0) * 0.22
         };
         self.phytoplankton_load += (bloom_target - self.phytoplankton_load)
             * (0.12 * calibration.phytoplankton_shading_multiplier * dt);
-        self.phytoplankton_load = self.phytoplankton_load.clamp(0.05, 0.85);
+        self.phytoplankton_load = self.phytoplankton_load.clamp(0.0, 0.85);
     }
 
     pub fn take(&mut self, n: f32, p: f32) -> (f32, f32) {
@@ -168,9 +171,9 @@ impl NutrientPool {
         // organic matter to dissolved nutrients quickly, but phosphorus is more
         // often retained in the benthic pool than nitrogen in shallow systems.
         self.dissolved_n += n * 0.58;
-        self.dissolved_p += p * 0.35;
+        self.dissolved_p += p * 0.20;
         self.sediment_n += n * 0.42;
-        self.sediment_p += p * 0.65;
+        self.sediment_p += p * 0.80;
     }
 }
 
@@ -404,7 +407,7 @@ pub fn producer_ecology_system(
     nutrients.recycle(pelagic_turnover * 0.05, pelagic_turnover * 0.008);
     nutrients.phytoplankton_load = (nutrients.phytoplankton_load + realized_pelagic_growth * 0.14
         - pelagic_turnover * 0.90)
-        .clamp(0.05, 0.85);
+        .clamp(0.0, 0.85);
     flux.net_primary_production += realized_pelagic_growth * 0.45;
     flux.labile_detritus_energy += realized_pelagic_growth * 0.75 + pelagic_turnover * 0.55;
 
@@ -429,6 +432,13 @@ pub fn producer_ecology_system(
         }
 
         let size_bonus = (1.20 / physics.body_mass.max(0.12).powf(0.24)).clamp(0.85, 1.85);
+        let pelagic_size_gate = if physics.body_mass <= 1.2 {
+            1.0
+        } else {
+            (1.2 / physics.body_mass.max(1.2))
+                .powf(1.35)
+                .clamp(0.18, 0.55)
+        };
         let filter_affinity = (feeding.graze_skill * 1.12
             + (1.0 - (physics.body_mass / 1.6).clamp(0.0, 1.0)) * 0.08
             - feeding.hunt_skill * 0.10)
@@ -443,11 +453,12 @@ pub fn producer_ecology_system(
             continue;
         }
 
-        let suspension_food = nutrients.phytoplankton_load.clamp(0.05, 1.0);
+        let suspension_food = nutrients.phytoplankton_load.clamp(0.0, 1.0);
         let intake_capacity = physics.base_metabolism.max(0.05)
             * (0.44 + filter_affinity * 1.20)
             * (0.55 + suspension_food * 1.65)
             * size_bonus
+            * pelagic_size_gate
             * (0.85 + appetite / energy.max.max(1e-3) * 0.75)
             * dt
             * 1.80;
@@ -465,7 +476,7 @@ pub fn producer_ecology_system(
         pelagic_grazing += assimilated;
     }
     nutrients.phytoplankton_load =
-        (nutrients.phytoplankton_load - pelagic_grazing * 0.0065).clamp(0.05, 0.85);
+        (nutrients.phytoplankton_load - pelagic_grazing * 0.0065).clamp(0.0, 0.85);
     flux.pelagic_consumer_intake += pelagic_grazing;
 
     for (pos, energy, physics, genome, state, age) in world.query_mut::<(
@@ -724,7 +735,7 @@ pub fn producer_ecology_system(
 /// closer to real consumer-resource systems than timer-driven spawning.
 pub fn consumer_life_history_system(world: &mut World, dt: f32) {
     let consumer_count = (&mut world.query::<&CreatureGenome>()).into_iter().count() as f32;
-    let crowding_pressure = ((consumer_count - 56.0) / 84.0).clamp(0.0, 1.0);
+    let crowding_pressure = ((consumer_count - 42.0) / 30.0).clamp(0.0, 1.0);
 
     for (energy, age, genome, physics, needs, state) in world.query_mut::<(
         &mut Energy,
@@ -739,12 +750,12 @@ pub fn consumer_life_history_system(world: &mut World, dt: f32) {
 
         let reserve_ratio = energy.fraction();
         let age_fraction = (age.ticks as f32 / age.max_ticks.max(1) as f32).clamp(0.0, 1.35);
-        let senescence = ((age_fraction - 0.58) / 0.42).clamp(0.0, 1.0);
+        let senescence = ((age_fraction - 0.50) / 0.40).clamp(0.0, 1.0);
         // Research note: age at maturity rises with body size, but much more
         // weakly than total lifespan in aquatic ectotherms, so maturation is
         // tracked on its own allometric timescale instead of as a fixed share
         // of lifespan (Gillooly et al., 2002).
-        let maturation_ticks = 7_200.0
+        let maturation_ticks = 5_600.0
             * (0.78 + physics.body_mass.max(0.1).powf(0.32) * 0.38 + genome.complexity * 0.48)
                 .clamp(0.72, 1.48);
         let age_signal = (age.ticks as f32 / maturation_ticks.max(1.0)).clamp(0.0, 1.4);
@@ -776,8 +787,8 @@ pub fn consumer_life_history_system(world: &mut World, dt: f32) {
 
         let adultness = state.maturity_progress;
         let threshold = consumer_reproductive_threshold(physics, genome);
-        let surplus_condition =
-            ((state.reserve_buffer - 0.56) / 0.24).clamp(0.0, 1.0) * (1.0 - crowding_pressure * 0.35);
+        let surplus_condition = ((state.reserve_buffer - 0.56) / 0.24).clamp(0.0, 1.0)
+            * (1.0 - crowding_pressure * 0.35);
         let hunger_relief = (1.0 - needs.hunger).clamp(0.0, 1.0);
         let assimilation_gate = (state.recent_assimilation / 0.07).clamp(0.0, 1.0);
 
@@ -804,16 +815,23 @@ pub fn consumer_life_history_system(world: &mut World, dt: f32) {
         if reserve_ratio < 0.38 || needs.hunger > 0.74 {
             state.reproductive_buffer = (state.reproductive_buffer - dt * 0.0036).max(0.0);
         }
+        let low_assimilation_stress = if state.recent_assimilation < 0.03 {
+            let stress = ((0.03 - state.recent_assimilation) / 0.03).clamp(0.0, 1.0);
+            state.reserve_buffer =
+                (state.reserve_buffer - dt * (0.0016 + stress * 0.0030)).max(0.0);
+            needs.hunger = (needs.hunger + dt * (0.0009 + stress * 0.0016)).min(1.0);
+            stress
+        } else {
+            0.0
+        };
         if senescence > 0.0 {
-            state.reproductive_buffer = (state.reproductive_buffer
-                - dt * (0.0010 + senescence * 0.0030))
-                .max(0.0);
-            needs.hunger = (needs.hunger + dt * senescence * 0.0018).min(1.0);
+            state.reproductive_buffer =
+                (state.reproductive_buffer - dt * (0.0014 + senescence * 0.0036)).max(0.0);
+            needs.hunger = (needs.hunger + dt * senescence * 0.0025).min(1.0);
         }
         if crowding_pressure > 0.0 {
-            state.reproductive_buffer = (state.reproductive_buffer
-                - dt * crowding_pressure * 0.0028)
-                .max(0.0);
+            state.reproductive_buffer =
+                (state.reproductive_buffer - dt * crowding_pressure * 0.0028).max(0.0);
             needs.hunger = (needs.hunger + dt * crowding_pressure * 0.0012).min(1.0);
         }
 
@@ -822,18 +840,23 @@ pub fn consumer_life_history_system(world: &mut World, dt: f32) {
         } else {
             (state.reproductive_buffer / threshold.max(1e-3)).clamp(0.0, 1.25)
         };
-        needs.reproduction =
-            (adultness
-                * urge
-                * (0.48 + reserve_ratio * 0.52)
-                * (1.0 - needs.hunger * 0.26)
-                * (1.0 - senescence * 0.32))
-                .clamp(0.0, 1.0);
+        needs.reproduction = (adultness
+            * urge
+            * (0.48 + reserve_ratio * 0.52)
+            * (1.0 - needs.hunger * 0.26)
+            * (1.0 - senescence * 0.32))
+            .clamp(0.0, 1.0);
 
         let reproductive_load = (state.reproductive_buffer / threshold.max(1e-3)).clamp(0.0, 1.0);
+        let starvation_overhead = if state.recent_assimilation < 0.015 {
+            low_assimilation_stress * 0.0014
+        } else {
+            0.0
+        };
         let somatic_overhead = (adultness * 0.0007
-            + senescence * 0.0026
-            + reproductive_load * 0.0005
+            + senescence * 0.0042
+            + reproductive_load * 0.0006
+            + starvation_overhead
             + crowding_pressure * (0.0008 + adultness * 0.0007))
             * dt;
         if somatic_overhead > 0.0 {
@@ -1083,10 +1106,25 @@ pub fn apply_kills(world: &mut World, kills: &[(Entity, Entity)], dt: f32) -> Fe
                     + reserve_removed * nutritional_value * 2.8;
             } else {
                 // Partial grazing of non-plant producers (food / detritus).
+                let detritus_bonus = if world.get::<&Detritus>(prey).is_ok() {
+                    world
+                        .get::<&FeedingCapability>(pred)
+                        .map(|feeding| {
+                            1.0 + (feeding.graze_skill * (1.0 - feeding.hunt_skill).clamp(0.0, 1.0))
+                                .clamp(0.0, 1.0)
+                                * 0.18
+                        })
+                        .unwrap_or(1.0)
+                } else {
+                    1.0
+                };
                 let graze_amount = world
                     .get::<&Energy>(prey)
                     .map(|e| {
-                        desired_gain.min(e.current.min(e.max * (0.14 + 0.26 * hunger) * dt * 2.4))
+                        desired_gain.min(
+                            e.current
+                                .min(e.max * (0.14 + 0.26 * hunger) * dt * 2.4 * detritus_bonus),
+                        )
                     })
                     .unwrap_or(0.0);
 
@@ -2310,7 +2348,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nutrient_floor_prevents_depletion() {
+    fn test_soft_external_loading_restores_depleted_nutrients() {
         let mut pool = NutrientPool {
             dissolved_n: 0.0,
             dissolved_p: 0.0,
@@ -2322,13 +2360,13 @@ mod tests {
         let cal = EcologyCalibration::default();
         pool.tick(&env, 1.0, &cal);
         assert!(
-            pool.dissolved_n >= 3.5,
-            "Dissolved N should be above floor: {}",
+            pool.dissolved_n > 0.0,
+            "Soft loading should restore some dissolved N: {}",
             pool.dissolved_n
         );
         assert!(
-            pool.dissolved_p >= 0.5,
-            "Dissolved P should be above floor: {}",
+            pool.dissolved_p > 0.0,
+            "Soft loading should restore some dissolved P: {}",
             pool.dissolved_p
         );
     }
@@ -2355,23 +2393,32 @@ mod tests {
     }
 
     #[test]
-    fn test_increased_benthic_p_release() {
+    fn test_deficit_sensitive_benthic_release_increases_when_poor() {
         let mut pool = NutrientPool::default();
         let env = default_env();
         let cal = EcologyCalibration::default();
-        let initial_p = pool.dissolved_p;
-        let initial_sed_p = pool.sediment_p;
+        let baseline_sed_p = pool.sediment_p;
         pool.tick(&env, 1.0, &cal);
-        let released_p = initial_sed_p - pool.sediment_p;
-        // At 0.005 rate: 44.0 * 0.005 = 0.22 per second
+        let baseline_release_p = baseline_sed_p - pool.sediment_p;
+
+        let mut depleted_pool = NutrientPool {
+            dissolved_n: 6.0,
+            dissolved_p: 0.2,
+            sediment_n: 220.0,
+            sediment_p: 44.0,
+            phytoplankton_load: 0.15,
+        };
+        let depleted_sed_p = depleted_pool.sediment_p;
+        depleted_pool.tick(&env, 1.0, &cal);
+        let depleted_release_p = depleted_sed_p - depleted_pool.sediment_p;
+
         assert!(
-            released_p > 0.2,
-            "Benthic P release should be significant: {}",
-            released_p
+            depleted_release_p > baseline_release_p,
+            "P release should increase under dissolved-P deficit: baseline={baseline_release_p:.4} depleted={depleted_release_p:.4}",
         );
         assert!(
-            pool.dissolved_p > initial_p,
-            "Dissolved P should increase from benthic release"
+            depleted_pool.dissolved_p > 0.2,
+            "Low dissolved P should recover under deficit-sensitive release"
         );
     }
 
@@ -2422,7 +2469,7 @@ mod tests {
             "Pelagic phytoplankton should leak some production into the detrital loop"
         );
         assert!(
-            nutrients.phytoplankton_load >= 0.05 && nutrients.phytoplankton_load <= 0.85,
+            nutrients.phytoplankton_load >= 0.0 && nutrients.phytoplankton_load <= 0.85,
             "Phytoplankton load should stay in the configured bounds"
         );
     }

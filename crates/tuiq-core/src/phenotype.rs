@@ -3,9 +3,10 @@
 //! All derivations use continuous interpolation — no enum matches.
 
 use crate::genome::CreatureGenome;
+use serde::{Deserialize, Serialize};
 
 /// Physical capabilities derived entirely from the genome's morphology.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DerivedPhysics {
     /// Maximum swim speed in cells/sec.
     pub max_speed: f32,
@@ -31,7 +32,7 @@ pub struct DerivedPhysics {
 
 /// Feeding capability derived from genome — determines what a creature can eat.
 /// Replaces the old TrophicRole enum with emergent, continuous feeding behavior.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FeedingCapability {
     /// Maximum prey body_mass this creature can consume.
     pub max_prey_mass: f32,

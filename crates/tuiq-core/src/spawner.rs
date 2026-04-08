@@ -31,7 +31,7 @@ const MAX_BIRTHS_PER_TICK: usize = 2;
 /// Simple cells (complexity < 0.5) reproduce asexually.
 /// Complex creatures need a compatible mate nearby.
 fn max_population_for_tank(tank_w: f32, tank_h: f32) -> usize {
-    (((tank_w.max(1.0) * tank_h.max(1.0)).sqrt() * 4.2).round() as usize).clamp(90, 360)
+    (((tank_w.max(1.0) * tank_h.max(1.0)).sqrt() * 2.6).round() as usize).clamp(48, 160)
 }
 
 pub fn reproduction_system(
@@ -135,9 +135,9 @@ pub fn reproduction_system(
         if already_mated.contains(&parent_a) {
             continue;
         }
-        if crowding > 0.70 {
-            let suppression = ((crowding - 0.70) / 0.30).clamp(0.0, 1.0);
-            let allow = (1.0 - suppression * 0.82).clamp(0.12, 1.0);
+        if crowding > 0.60 {
+            let suppression = ((crowding - 0.60) / 0.40).clamp(0.0, 1.0);
+            let allow = (1.0 - suppression * 0.88).clamp(0.08, 1.0);
             if !rng.random_bool(allow as f64) {
                 continue;
             }
@@ -358,11 +358,11 @@ pub fn reproduction_system(
         };
         if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(parent_a) {
             state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-            state.brood_cooldown = parent_cooldown.max(72.0);
-            state.recent_assimilation *= 0.6;
+            state.brood_cooldown = parent_cooldown.max(110.0);
+            state.recent_assimilation *= 0.35;
         }
         if let Ok(mut e) = world.get::<&mut Energy>(parent_a) {
-            e.current -= e.max * 0.18;
+            e.current -= e.max * 0.24;
         }
         if let Ok(mut n) = world.get::<&mut Needs>(parent_a) {
             n.reproduction = 0.0;
@@ -383,11 +383,11 @@ pub fn reproduction_system(
             };
             if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(mate) {
                 state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-                state.brood_cooldown = mate_cooldown.max(72.0);
-                state.recent_assimilation *= 0.6;
+                state.brood_cooldown = mate_cooldown.max(110.0);
+                state.recent_assimilation *= 0.35;
             }
             if let Ok(mut e) = world.get::<&mut Energy>(mate) {
-                e.current -= e.max * 0.18;
+                e.current -= e.max * 0.24;
             }
             if let Ok(mut n) = world.get::<&mut Needs>(mate) {
                 n.reproduction = 0.0;

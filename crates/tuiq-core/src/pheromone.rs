@@ -1,6 +1,8 @@
 /// Pheromone concentration grid for chemical signaling.
 /// Creatures deposit pheromones; concentrations decay and diffuse over time.
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PheromoneGrid {
     width: usize,  // number of cells in X
     height: usize, // number of cells in Y

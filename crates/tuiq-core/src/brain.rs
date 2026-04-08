@@ -80,6 +80,7 @@ use hecs::{Entity, World};
 use rand::Rng;
 use rand::RngExt;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::behavior::{BehaviorAction, BehaviorState};
 use crate::components::{Position, Velocity};
@@ -163,7 +164,7 @@ const C_ACTIVATION: f32 = 0.3; // fraction of nodes with different activations
 /// - Abs:      magnitude detection — useful for distance-based computations
 /// - Step:     binary threshold — sharp decision boundaries
 /// - Identity: linear pass-through — preserves raw signal (used for inputs)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivationFn {
     Tanh,
     ReLU,
@@ -255,7 +256,7 @@ impl ActivationFn {
 
 /// Specialized role for a node. Most nodes are Standard; Modulator and
 /// Attention nodes have special forward-pass behavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeRole {
     /// Normal neuron: weighted sum -> activation
     Standard,
@@ -297,7 +298,7 @@ impl Default for NodeRole {
 /// Together, these four parameters define the "personality" of a neuron —
 /// how it responds (activation_fn), its resting state (bias), its role
 /// in the network (role), and how long its signal echoes (trace_decay).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeGene {
     pub activation_fn: ActivationFn,
     pub bias: f32,
@@ -319,7 +320,7 @@ pub struct NodeGene {
 /// A single connection in the NEAT genome, identified by its innovation number.
 /// Self-connections (in_node == out_node) create recurrent loops that read from
 /// the node's exponential trace, enabling temporal memory.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionGene {
     pub in_node: u16,
     pub out_node: u16,
@@ -338,7 +339,7 @@ pub struct ConnectionGene {
 
 /// Tracks structural innovation numbers for NEAT crossover alignment.
 /// Within a generation, identical structural mutations share the same number.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnovationTracker {
     counter: u32,
     history: HashMap<(u16, u16), u32>,
@@ -381,7 +382,7 @@ impl InnovationTracker {
 /// NEAT-style genome: a variable-length list of connection genes plus
 /// per-node genes (activation function, bias, role, trace decay).
 /// Node depths enforce feedforward structure within a single tick.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainGenome {
     pub connections: Vec<ConnectionGene>,
     /// Depth of each node (indexed by node ID). Input=0.0, Output=1.0, Hidden=between.
@@ -477,7 +478,7 @@ impl BrainGenome {
 ///   (previous-tick state) and break the feedforward DAG assumption
 /// - Traces implement exponential moving averages (biological Ca2+ dynamics)
 ///   that give neurons configurable temporal memory spans
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Brain {
     order: Vec<u16>,
     /// Incoming connections per node: incoming[node_id] = [(source, weight), ...]

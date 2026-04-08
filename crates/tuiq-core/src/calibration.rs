@@ -1,7 +1,8 @@
 //! Centralized startup and ecology calibration parameters.
+use serde::{Deserialize, Serialize};
 
 /// Default startup and ecology calibration for the unified aquatic model.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EcologyCalibration {
     pub producers_per_1000_cells: f32,
     pub min_consumer_founders: usize,
@@ -18,7 +19,7 @@ pub struct EcologyCalibration {
 }
 
 /// Evolutionary calibration layered on top of the ecological baseline.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EvolutionCalibration {
     pub creature_mutation_multiplier: f32,
     pub producer_mutation_multiplier: f32,
@@ -26,7 +27,7 @@ pub struct EvolutionCalibration {
 }
 
 /// Full runtime calibration bundle used by the simulation.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeCalibration {
     pub ecology: EcologyCalibration,
     pub evolution: EvolutionCalibration,
@@ -35,16 +36,16 @@ pub struct RuntimeCalibration {
 impl Default for EcologyCalibration {
     fn default() -> Self {
         Self {
-            producers_per_1000_cells: 14.0,
+            producers_per_1000_cells: 12.0,
             min_consumer_founders: 6,
             max_consumer_founders: 9,
-            founder_spacing: 2.6,
+            founder_spacing: 3.1,
             consumer_biomass_share: 0.06,
             edible_biomass_bonus: 0.085,
             producer_growth_multiplier: 1.0,
             producer_maintenance_multiplier: 1.0,
             producer_turnover_multiplier: 1.0,
-            producer_nutrient_demand_multiplier: 0.50,
+            producer_nutrient_demand_multiplier: 0.40,
             phytoplankton_shading_multiplier: 1.0,
             consumer_metabolism_multiplier: 0.42,
         }

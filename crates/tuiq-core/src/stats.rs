@@ -1,11 +1,13 @@
 //! Simulation statistics and ecology diagnostics.
 
 use crate::components::{ConsumerState, ProducerState};
+use crate::ecosystem::{Detritus, Energy};
 use crate::genetics::{genomic_distance, CREATURE_SPECIES_THRESHOLD};
 use crate::genome::CreatureGenome;
 use crate::phenotype::DerivedPhysics;
+use serde::{Deserialize, Serialize};
 /// Statistics about the current simulation state.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SimStats {
     pub entity_count: usize,
     pub creature_count: usize,
@@ -37,7 +39,7 @@ pub struct SimStats {
 
 pub(crate) const ECOLOGY_HISTORY_DAYS: usize = 32;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EcologyInstant {
     pub producer_total_biomass: f32,
     pub producer_active_biomass: f32,
@@ -59,11 +61,19 @@ pub struct EcologyInstant {
     pub maintenance_to_intake_ratio: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DailyEcologySample {
     pub day: u64,
     pub producer_total_biomass: f32,
     pub consumer_biomass: f32,
+    #[serde(default)]
+    pub creature_count: usize,
+    #[serde(default)]
+    pub juvenile_count: usize,
+    #[serde(default)]
+    pub species_count: usize,
+    #[serde(default)]
+    pub detritus_energy: f32,
     pub rolling_producer_npp: f32,
     pub rolling_consumer_intake: f32,
     pub rolling_consumer_maintenance: f32,
@@ -76,7 +86,7 @@ pub struct DailyEcologySample {
     pub producer_deaths_delta: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EcologyDiagnostics {
     pub instant: EcologyInstant,
     pub daily_history: Vec<DailyEcologySample>,
@@ -213,10 +223,18 @@ impl super::AquariumSim {
 
     pub(crate) fn record_daily_diagnostics(&mut self) {
         let instant = self.build_ecology_instant();
+        let mut detritus_energy = self.pending_labile_detritus_energy.max(0.0);
+        for (_detritus, energy) in &mut self.world.query::<(&Detritus, &Energy)>() {
+            detritus_energy += energy.current.max(0.0);
+        }
         let sample = DailyEcologySample {
             day: self.elapsed_days,
             producer_total_biomass: instant.producer_total_biomass,
             consumer_biomass: instant.consumer_biomass,
+            creature_count: self.cached_creature_count,
+            juvenile_count: self.cached_juvenile_count,
+            species_count: self.cached_species_count,
+            detritus_energy,
             rolling_producer_npp: instant.rolling_producer_npp,
             rolling_consumer_intake: instant.rolling_consumer_intake,
             rolling_consumer_maintenance: instant.rolling_consumer_maintenance,
@@ -245,7 +263,8 @@ impl super::AquariumSim {
         if self.daily_ecology_history.len() == ECOLOGY_HISTORY_DAYS {
             self.daily_ecology_history.pop_front();
         }
-        self.daily_ecology_history.push_back(sample);
+        self.daily_ecology_history.push_back(sample.clone());
+        self.archived_daily_history.push(sample);
     }
 
     pub(crate) fn reset_runtime_counters(&mut self) {
@@ -262,11 +281,16 @@ impl super::AquariumSim {
         self.rolling_consumer_maintenance = 0.0;
         self.pending_labile_detritus_energy = 0.0;
         self.daily_ecology_history.clear();
+        self.archived_daily_history.clear();
         self.last_daily_creature_births = 0;
         self.last_daily_creature_deaths = 0;
         self.last_daily_producer_births = 0;
         self.last_daily_producer_deaths = 0;
         self.recompute_cached_stats();
         self.stats_cache_tick = self.tick_count;
+    }
+
+    pub fn archived_daily_history(&self) -> &[DailyEcologySample] {
+        &self.archived_daily_history
     }
 }

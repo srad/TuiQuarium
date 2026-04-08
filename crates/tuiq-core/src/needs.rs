@@ -1,7 +1,9 @@
 //! Realistic animal needs system — drives behavior through a priority hierarchy.
 
+use serde::{Deserialize, Serialize};
+
 /// Each creature's needs, ranging from 0.0 (fully satisfied) to 1.0 (critical).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Needs {
     // Survival needs (highest priority)
     pub hunger: f32,
@@ -51,7 +53,7 @@ impl Needs {
 }
 
 /// Weights that control how quickly each need accumulates — species personality.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NeedWeights {
     pub hunger_rate: f32,
     pub safety_sensitivity: f32,

@@ -2,9 +2,10 @@
 
 use crate::components::AnimAction;
 use crate::needs::Needs;
+use serde::{Deserialize, Serialize};
 
 /// The current behavioral action being performed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BehaviorAction {
     Flee,
     Surface,
@@ -56,7 +57,7 @@ impl BehaviorAction {
 }
 
 /// The behavior state of a creature.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviorState {
     pub action: BehaviorAction,
     pub action_timer: f32,

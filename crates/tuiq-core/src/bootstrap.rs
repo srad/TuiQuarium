@@ -530,8 +530,8 @@ impl super::AquariumSim {
             // Research note: the unified model starts from low-biomass producer
             // colonies so early visible growth is honest rather than staged.
             state.structural_biomass = structural_target * structural_fill;
-            state.leaf_biomass = leaf_target * leaf_fill;
-            state.belowground_reserve = belowground_target * below_fill;
+            state.leaf_biomass = leaf_target * leaf_fill * 0.8;
+            state.belowground_reserve = belowground_target * below_fill * 0.8;
             state.meristem_bank = meristem_bank.min(0.90);
             state.epiphyte_load = 0.0;
             state.seed_cooldown = seed_cooldown;
@@ -576,7 +576,7 @@ impl super::AquariumSim {
         &mut self,
         entity: Entity,
         cohort_index: usize,
-        total_founders: usize,
+        _total_founders: usize,
     ) {
         let (physics, genome) = {
             let physics = self.world.get::<&DerivedPhysics>(entity).unwrap().clone();
@@ -584,13 +584,6 @@ impl super::AquariumSim {
             (physics, genome)
         };
         let threshold = ecosystem::consumer_reproductive_threshold(&physics, &genome);
-        let adult_slots = if total_founders >= 5 {
-            2
-        } else if total_founders >= 3 {
-            1
-        } else {
-            1
-        };
 
         let (
             age_fraction,
@@ -602,42 +595,51 @@ impl super::AquariumSim {
             brood_cooldown,
             hunger,
             energy_fraction,
-        ): (f32, f32, f32, f32, f32, f32, f32, f32, f32) = if cohort_index < adult_slots {
-            (
-                0.26 + self.rng.random_range(0.0..0.08),
-                0.36 + self.rng.random_range(0.0..0.04),
+        ): (f32, f32, f32, f32, f32, f32, f32, f32, f32) = match cohort_index {
+            0 => (
+                0.82 + self.rng.random_range(0.0..0.08),
+                0.26 + self.rng.random_range(0.0..0.04),
                 1.0,
-                0.72 + self.rng.random_range(0.0..0.08),
-                threshold * (0.46 + self.rng.random_range(0.0..0.16)),
-                0.10 + self.rng.random_range(0.0..0.05),
-                12.0 + self.rng.random_range(0.0..16.0),
-                0.34 + self.rng.random_range(0.0..0.08),
-                0.82 + self.rng.random_range(0.0..0.06),
-            )
-        } else if cohort_index < adult_slots + 3 {
-            (
-                0.12 + self.rng.random_range(0.0..0.08),
-                0.50 + self.rng.random_range(0.0..0.06),
-                0.54 + self.rng.random_range(0.0..0.18),
-                0.48 + self.rng.random_range(0.0..0.10),
-                threshold * (0.14 + self.rng.random_range(0.0..0.10)),
-                0.05 + self.rng.random_range(0.0..0.04),
-                8.0 + self.rng.random_range(0.0..12.0),
-                0.42 + self.rng.random_range(0.0..0.10),
+                0.68 + self.rng.random_range(0.0..0.06),
+                threshold * (0.90 + self.rng.random_range(0.0..0.08)),
+                0.08 + self.rng.random_range(0.0..0.04),
+                self.rng.random_range(0.0..6.0),
+                0.26 + self.rng.random_range(0.0..0.08),
+                0.76 + self.rng.random_range(0.0..0.08),
+            ),
+            1 => (
+                0.70 + self.rng.random_range(0.0..0.10),
+                0.34 + self.rng.random_range(0.0..0.05),
+                1.0,
+                0.62 + self.rng.random_range(0.0..0.08),
+                threshold * (0.45 + self.rng.random_range(0.0..0.15)),
+                0.07 + self.rng.random_range(0.0..0.03),
+                16.0 + self.rng.random_range(0.0..12.0),
+                0.30 + self.rng.random_range(0.0..0.08),
                 0.74 + self.rng.random_range(0.0..0.08),
-            )
-        } else {
-            (
-                0.02 + self.rng.random_range(0.0..0.04),
-                0.78 + self.rng.random_range(0.0..0.08),
-                0.16 + self.rng.random_range(0.0..0.14),
-                0.30 + self.rng.random_range(0.0..0.10),
-                threshold * (0.02 + self.rng.random_range(0.0..0.04)),
-                0.02 + self.rng.random_range(0.0..0.03),
-                6.0 + self.rng.random_range(0.0..10.0),
-                0.54 + self.rng.random_range(0.0..0.10),
+            ),
+            2 => (
+                0.14 + self.rng.random_range(0.0..0.08),
+                0.70 + self.rng.random_range(0.0..0.08),
+                0.56 + self.rng.random_range(0.0..0.16),
+                0.42 + self.rng.random_range(0.0..0.10),
+                threshold * (0.12 + self.rng.random_range(0.0..0.10)),
+                0.05 + self.rng.random_range(0.0..0.03),
+                20.0 + self.rng.random_range(0.0..16.0),
+                0.40 + self.rng.random_range(0.0..0.10),
                 0.68 + self.rng.random_range(0.0..0.08),
-            )
+            ),
+            _ => (
+                0.02 + self.rng.random_range(0.0..0.04),
+                0.82 + self.rng.random_range(0.0..0.08),
+                0.10 + self.rng.random_range(0.0..0.12),
+                0.26 + self.rng.random_range(0.0..0.12),
+                threshold * self.rng.random_range(0.0..0.20),
+                0.01 + self.rng.random_range(0.0..0.03),
+                24.0 + self.rng.random_range(0.0..24.0),
+                0.46 + self.rng.random_range(0.0..0.10),
+                0.62 + self.rng.random_range(0.0..0.10),
+            ),
         };
 
         if let Ok(mut age) = self.world.get::<&mut Age>(entity) {
@@ -730,14 +732,14 @@ impl super::AquariumSim {
                 }
             })
             .collect();
-        let initial_detritus_energy = (self.cached_producer_leaf_biomass * 0.22)
+        let initial_detritus_energy = (self.cached_producer_leaf_biomass * 0.12)
             .clamp(0.0, self.cached_producer_leaf_biomass * 0.35);
         let mut remaining_detritus_energy = initial_detritus_energy;
-        let detritus_packet_energy = 1.6;
+        let detritus_packet_energy = 1.2;
         let detritus_packets = ((remaining_detritus_energy / detritus_packet_energy).floor()
             as usize)
             .min(producer_positions.len().max(1))
-            .min(8);
+            .min(5);
         // Research note: real aquatic founder webs begin with a detrital /
         // dissolved-organic background rather than perfectly clean water (Azam
         // et al., 1983), so the bootstrap seeds a modest labile detritus pool

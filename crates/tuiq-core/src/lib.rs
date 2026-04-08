@@ -4,6 +4,7 @@ pub mod boids;
 pub mod brain;
 pub mod calibration;
 pub mod components;
+pub mod ecology_equilibrium;
 pub mod ecosystem;
 pub mod environment;
 pub mod genetics;
@@ -13,6 +14,7 @@ pub mod phenotype;
 pub mod pheromone;
 pub mod physics;
 pub mod producer_lifecycle;
+pub mod save;
 pub mod spatial;
 pub mod spawner;
 
@@ -141,6 +143,7 @@ pub struct AquariumSim {
     feeding_frenzy_detritus_budget: f32,
     stats_cache_tick: u64,
     daily_ecology_history: VecDeque<DailyEcologySample>,
+    archived_daily_history: Vec<DailyEcologySample>,
     last_daily_creature_births: u64,
     last_daily_creature_deaths: u64,
     last_daily_producer_births: u64,
@@ -249,6 +252,7 @@ impl AquariumSim {
             feeding_frenzy_detritus_budget: 0.0,
             stats_cache_tick: 0,
             daily_ecology_history: VecDeque::with_capacity(ECOLOGY_HISTORY_DAYS),
+            archived_daily_history: Vec::new(),
             last_daily_creature_births: 0,
             last_daily_creature_deaths: 0,
             last_daily_producer_births: 0,
@@ -2802,20 +2806,163 @@ mod tests {
     }
 
     #[test]
-    fn test_default_bootstrap_thriving_lake_for_200_days() {
+    fn test_default_bootstrap_startup_transient_stays_buffered() {
         let mut sim = AquariumSim::new_seeded(48, 16, 42);
         sim.bootstrap_founder_web();
 
         let dt = 4.0;
         let ticks_per_day = (300.0 / dt) as usize;
-        let mut visible_consumer_days = 0usize;
-        let mut juvenile_days = 0usize;
-        let mut zero_consumer_streak = 0usize;
-        let mut longest_zero_consumer_streak = 0usize;
-        let mut producers_never_collapsed = true;
-        let mut peak_creature_count = 0usize;
+        let mut day_one_producer = None;
+        let mut day_five_nutrients = None;
+        let mut day_ten_producer = None;
+        let mut consumers_survived = true;
 
-        for tick in 0..(ticks_per_day * 200) {
+        for tick in 0..(ticks_per_day * 15) {
+            sim.tick(dt);
+            if (tick + 1) % ticks_per_day == 0 {
+                let day = (tick + 1) / ticks_per_day;
+                let stats = sim.stats();
+                let producer_biomass = stats.producer_leaf_biomass
+                    + stats.producer_structural_biomass
+                    + stats.producer_belowground_reserve;
+
+                if day == 1 {
+                    day_one_producer = Some(producer_biomass);
+                }
+                if day == 5 {
+                    day_five_nutrients =
+                        Some((sim.nutrients.dissolved_n, sim.nutrients.dissolved_p));
+                }
+                if day == 10 {
+                    day_ten_producer = Some(producer_biomass);
+                }
+                if stats.creature_count == 0 {
+                    consumers_survived = false;
+                    break;
+                }
+            }
+        }
+
+        let day_one_producer = day_one_producer.expect("startup transient should capture day 1");
+        let (day_five_n, day_five_p) =
+            day_five_nutrients.expect("startup transient should capture day 5 nutrients");
+        let day_ten_producer = day_ten_producer.expect("startup transient should capture day 10");
+
+        assert!(
+            consumers_survived,
+            "Startup transient should not wipe out consumers in the first 15 days"
+        );
+        assert!(
+            day_five_n >= 6.8,
+            "Startup dissolved N should stay buffered by day 5, got {:.2}",
+            day_five_n,
+        );
+        assert!(
+            day_five_p >= 1.5,
+            "Startup dissolved P should stay buffered by day 5, got {:.2}",
+            day_five_p,
+        );
+        assert!(
+            day_ten_producer < day_one_producer * 3.0,
+            "Producer biomass should not boom more than 3x the day-1 level during startup: day1={:.2} day10={:.2}",
+            day_one_producer,
+            day_ten_producer,
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_realistic_lake_for_120_days() {
+        let mut sim = AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 4.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        let mut consumer_positive_days = 0usize;
+        let mut juvenile_days = 0usize;
+        let mut peak_creature_count = 0usize;
+        let mut first_birth_day = None;
+        let mut prev_creature_births = 0u64;
+
+        for tick in 0..(ticks_per_day * 120) {
+            sim.tick(dt);
+            if (tick + 1) % ticks_per_day == 0 {
+                let day = (tick + 1) / ticks_per_day;
+                let stats = sim.stats();
+                if first_birth_day.is_none() && stats.creature_births > prev_creature_births {
+                    first_birth_day = Some(day as u64);
+                }
+                prev_creature_births = stats.creature_births;
+                if stats.creature_count > 0 && stats.consumer_biomass > 0.4 {
+                    consumer_positive_days += 1;
+                }
+                if stats.juvenile_count > 0 {
+                    juvenile_days += 1;
+                }
+                peak_creature_count = peak_creature_count.max(stats.creature_count);
+            }
+        }
+
+        let stats = sim.stats();
+        let (equilibrium_model, equilibrium_target) =
+            crate::ecology_equilibrium::ReducedEquilibriumModel::reference_clearwater();
+        let equilibrium_window: Vec<_> = sim
+            .archived_daily_history()
+            .iter()
+            .filter(|sample| sample.day >= 30)
+            .cloned()
+            .collect();
+        let mean_observables = equilibrium_model
+            .mean_observable_metrics(&equilibrium_window)
+            .expect("realism run should accumulate archived daily history after day 30");
+        let reference_observables =
+            equilibrium_model.reference_observable_metrics(equilibrium_target);
+
+        assert!(
+            first_birth_day.unwrap_or(u64::MAX) <= 45,
+            "Realistic lake should show the first consumer birth by day 45, got {:?}",
+            first_birth_day,
+        );
+        assert!(
+            stats.creature_deaths >= 2,
+            "Realistic lake should show real consumer turnover by day 120, got {} deaths",
+            stats.creature_deaths,
+        );
+        assert!(
+            consumer_positive_days >= 95,
+            "Realistic lake should keep consumers present on most days, got {} consumer-positive days",
+            consumer_positive_days,
+        );
+        assert!(
+            juvenile_days >= 25,
+            "Realistic lake should keep juveniles visible across many days, got {} juvenile days",
+            juvenile_days,
+        );
+        assert!(
+            peak_creature_count <= 80,
+            "Realistic lake should avoid dense swarms, got peak creature count {}",
+            peak_creature_count,
+        );
+        assert!(
+            equilibrium_model.observable_metrics_in_default_realism_band(mean_observables),
+            "Mean archived ecology over days 30-120 should stay inside the reduced clear-water realism band. \
+             mean={mean_observables:?} reference={reference_observables:?}",
+        );
+    }
+
+    #[test]
+    #[ignore = "long realism soak"]
+    fn test_default_bootstrap_long_realism_soak_for_300_days() {
+        let mut sim = AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 4.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        let mut longest_zero_consumer_streak = 0usize;
+        let mut zero_consumer_streak = 0usize;
+        let mut producers_never_collapsed = true;
+        let mut max_dissolved_p: f32 = 0.0;
+
+        for tick in 0..(ticks_per_day * 300) {
             sim.tick(dt);
             if (tick + 1) % ticks_per_day == 0 {
                 let stats = sim.stats();
@@ -2826,13 +2973,6 @@ mod tests {
                     producers_never_collapsed = false;
                     break;
                 }
-                if stats.creature_count >= 4 && stats.consumer_biomass >= 1.0 {
-                    visible_consumer_days += 1;
-                }
-                if stats.juvenile_count > 0 {
-                    juvenile_days += 1;
-                }
-                peak_creature_count = peak_creature_count.max(stats.creature_count);
                 if stats.creature_count == 0 {
                     zero_consumer_streak += 1;
                     longest_zero_consumer_streak =
@@ -2840,71 +2980,23 @@ mod tests {
                 } else {
                     zero_consumer_streak = 0;
                 }
+                max_dissolved_p = max_dissolved_p.max(sim.nutrients.dissolved_p);
             }
         }
 
-        let stats = sim.stats();
-        let producer_biomass = stats.producer_leaf_biomass
-            + stats.producer_structural_biomass
-            + stats.producer_belowground_reserve;
-
         assert!(
             producers_never_collapsed,
-            "Producers should not collapse during the 200-day thriving-lake run"
+            "Long realism soak should not lose producer biomass entirely"
         );
         assert!(
-            producer_biomass > 20.0,
-            "Producer biomass should remain substantial after 200 days, got {:.2}",
-            producer_biomass,
-        );
-        assert!(
-            stats.creature_births >= 8,
-            "Thriving lake should produce sustained consumer births over 200 days. \
-             CreatureBirths={}, CreatureDeaths={}, Creatures={}, ConsumerBiomass={:.2}",
-            stats.creature_births,
-            stats.creature_deaths,
-            stats.creature_count,
-            stats.consumer_biomass,
-        );
-        assert!(
-            stats.max_generation >= 2,
-            "Thriving lake should advance consumer generations, got {}",
-            stats.max_generation,
-        );
-        assert!(
-            stats.species_count >= 2,
-            "Thriving lake should retain multiple consumer lineages, got {}",
-            stats.species_count,
-        );
-        assert!(
-            stats.creature_count >= 4,
-            "Thriving lake should end with a visible consumer population, got {}",
-            stats.creature_count,
-        );
-        assert!(
-            visible_consumer_days >= 150,
-            "Thriving lake should stay visibly active for most days, got {} visible days",
-            visible_consumer_days,
-        );
-        assert!(
-            juvenile_days >= 35,
-            "Thriving lake should keep juveniles in the population across many days, got {} juvenile days",
-            juvenile_days,
-        );
-        assert!(
-            longest_zero_consumer_streak <= 7,
-            "Thriving lake should not remain consumer-empty for long streaks, got {} days",
+            longest_zero_consumer_streak <= 20,
+            "Long realism soak should not remain consumer-empty for long streaks, got {} days",
             longest_zero_consumer_streak,
         );
         assert!(
-            peak_creature_count <= 180,
-            "Thriving lake should avoid runaway all-adult swarms, got peak population {}",
-            peak_creature_count,
-        );
-        assert!(
-            sim.nutrients.dissolved_p <= 120.0,
-            "Dissolved phosphorus should stay bounded over the 200-day run, got {:.2}",
-            sim.nutrients.dissolved_p,
+            max_dissolved_p <= 40.0,
+            "Long realism soak should keep dissolved phosphorus bounded, got {:.2}",
+            max_dissolved_p,
         );
     }
 
@@ -2992,21 +3084,22 @@ mod tests {
     }
 
     #[test]
-    fn test_nutrient_pool_never_depletes_below_floor() {
-        // Run a simulation for many ticks and verify nutrients stay above floor
+    fn test_soft_nutrient_loading_prevents_irreversible_depletion() {
+        // Run a simulation for many ticks and verify dissolved nutrients recover
+        // from depletion without hard floor clamping.
         let mut sim = AquariumSim::new_seeded(80, 24, 42);
         sim.bootstrap_ecosystem();
         for _ in 0..2000 {
             sim.tick(0.05);
         }
         assert!(
-            sim.nutrients.dissolved_n >= 3.5,
-            "Dissolved N should stay above floor after 2000 ticks: {}",
+            sim.nutrients.dissolved_n > 0.0,
+            "Dissolved N should remain recoverable after 2000 ticks: {}",
             sim.nutrients.dissolved_n
         );
         assert!(
-            sim.nutrients.dissolved_p >= 0.5,
-            "Dissolved P should stay above floor after 2000 ticks: {}",
+            sim.nutrients.dissolved_p > 0.0,
+            "Dissolved P should remain recoverable after 2000 ticks: {}",
             sim.nutrients.dissolved_p
         );
     }

@@ -1,33 +1,35 @@
+use serde::{Deserialize, Serialize};
+
 /// Position in the tank (float for smooth simulation, truncated to cells for rendering).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Position {
     pub x: f32,
     pub y: f32,
 }
 
 /// Velocity in cells per second.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Velocity {
     pub vx: f32,
     pub vy: f32,
 }
 
 /// Bounding box for collision and rendering (width, height in cells).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoundingBox {
     pub w: f32,
     pub h: f32,
 }
 
 /// Direction the creature is facing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Left,
     Right,
 }
 
 /// Visual appearance: pre-rendered ASCII art frames indexed by animation action.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Appearance {
     /// Animation frames per action. Index by [AnimAction as usize][frame_index].
     pub frame_sets: Vec<Vec<AsciiFrame>>,
@@ -37,7 +39,7 @@ pub struct Appearance {
 }
 
 /// A single frame of multi-line ASCII art.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsciiFrame {
     /// Each row as a string.
     pub rows: Vec<String>,
@@ -92,7 +94,7 @@ impl AsciiFrame {
 }
 
 /// Animation actions (used as indices into Appearance.frame_sets).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(usize)]
 pub enum AnimAction {
     Swim = 0,
@@ -102,7 +104,7 @@ pub enum AnimAction {
 pub const ANIM_ACTION_COUNT: usize = 2;
 
 /// Per-entity animation state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationState {
     pub current_action: AnimAction,
     pub frame_index: usize,
@@ -124,7 +126,7 @@ impl AnimationState {
 
 /// Producer colony growth stage — derived from reserve status, biomass fill,
 /// and accumulated stress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProducerStage {
     Cell,
     Patch,
@@ -134,13 +136,13 @@ pub enum ProducerStage {
 }
 
 /// Tracks how long a producer colony has been alive (in simulation seconds).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProducerAge {
     pub seconds: f32,
 }
 
 /// Marker for producer lineages that should remain visually rooted to the substrate.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct RootedMacrophyte;
 
 /// Dynamic consumer life-history state.
@@ -148,7 +150,7 @@ pub struct RootedMacrophyte;
 /// Research note: aquatic consumer reproduction depends on maturation delay and
 /// sustained energetic surplus rather than a simple elapsed-time timer, so the
 /// model tracks condition, maturation, and reproductive reserves explicitly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsumerState {
     pub reserve_buffer: f32,
     pub maturity_progress: f32,
@@ -176,7 +178,7 @@ impl ConsumerState {
 }
 
 /// How a producer offspring was established.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProducerOrigin {
     Broadcast,
     Fragment,
@@ -186,7 +188,7 @@ pub enum ProducerOrigin {
 ///
 /// `Energy` stores the reserve carbohydrate pool. This component stores
 /// slower-changing biomass pools and local ecological pressure.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProducerState {
     /// Long-lived attachment or support biomass.
     pub structural_biomass: f32,
