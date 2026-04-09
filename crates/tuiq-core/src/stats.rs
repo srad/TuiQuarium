@@ -1,9 +1,12 @@
 //! Simulation statistics and ecology diagnostics.
 
-use crate::components::{ConsumerState, ProducerState};
-use crate::ecosystem::{Detritus, Energy};
+use crate::components::{ConsumerState, ProducerState, RootedMacrophyte};
+use crate::ecosystem::{
+    consumer_reproduction_reserve_threshold, consumer_reproductive_threshold, Detritus, Energy,
+};
 use crate::genetics::{genomic_distance, CREATURE_SPECIES_THRESHOLD};
 use crate::genome::CreatureGenome;
+use crate::needs::Needs;
 use crate::phenotype::DerivedPhysics;
 use serde::{Deserialize, Serialize};
 /// Statistics about the current simulation state.
@@ -38,6 +41,7 @@ pub struct SimStats {
 }
 
 pub(crate) const ECOLOGY_HISTORY_DAYS: usize = 32;
+const SUBADULT_MATURITY_THRESHOLD: f32 = 0.85;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EcologyInstant {
@@ -71,9 +75,31 @@ pub struct DailyEcologySample {
     #[serde(default)]
     pub juvenile_count: usize,
     #[serde(default)]
+    pub subadult_count: usize,
+    #[serde(default)]
     pub species_count: usize,
     #[serde(default)]
+    pub rooted_producer_count: usize,
+    #[serde(default)]
+    pub rooted_producer_biomass: f32,
+    #[serde(default)]
     pub detritus_energy: f32,
+    #[serde(default)]
+    pub mean_maturity_progress: f32,
+    #[serde(default)]
+    pub mean_reserve_buffer: f32,
+    #[serde(default)]
+    pub mean_reproductive_buffer: f32,
+    #[serde(default)]
+    pub max_reproductive_buffer: f32,
+    #[serde(default)]
+    pub mean_recent_assimilation: f32,
+    #[serde(default)]
+    pub mean_brood_cooldown: f32,
+    #[serde(default)]
+    pub reproduction_ready_count: usize,
+    #[serde(default)]
+    pub rolling_pelagic_consumer_intake: f32,
     pub rolling_producer_npp: f32,
     pub rolling_consumer_intake: f32,
     pub rolling_consumer_maintenance: f32,
@@ -90,6 +116,17 @@ pub struct DailyEcologySample {
 pub struct EcologyDiagnostics {
     pub instant: EcologyInstant,
     pub daily_history: Vec<DailyEcologySample>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct ConsumerLifeHistorySummary {
+    mean_maturity_progress: f32,
+    mean_reserve_buffer: f32,
+    mean_reproductive_buffer: f32,
+    max_reproductive_buffer: f32,
+    mean_recent_assimilation: f32,
+    mean_brood_cooldown: f32,
+    reproduction_ready_count: usize,
 }
 
 impl super::AquariumSim {
@@ -223,6 +260,9 @@ impl super::AquariumSim {
 
     pub(crate) fn record_daily_diagnostics(&mut self) {
         let instant = self.build_ecology_instant();
+        let life_history = self.sample_consumer_life_history();
+        let (juvenile_count, subadult_count) = self.sample_consumer_stage_counts();
+        let (rooted_producer_count, rooted_producer_biomass) = self.sample_rooted_producer_summary();
         let mut detritus_energy = self.pending_labile_detritus_energy.max(0.0);
         for (_detritus, energy) in &mut self.world.query::<(&Detritus, &Energy)>() {
             detritus_energy += energy.current.max(0.0);
@@ -232,9 +272,20 @@ impl super::AquariumSim {
             producer_total_biomass: instant.producer_total_biomass,
             consumer_biomass: instant.consumer_biomass,
             creature_count: self.cached_creature_count,
-            juvenile_count: self.cached_juvenile_count,
+            juvenile_count,
+            subadult_count,
             species_count: self.cached_species_count,
+            rooted_producer_count,
+            rooted_producer_biomass,
             detritus_energy,
+            mean_maturity_progress: life_history.mean_maturity_progress,
+            mean_reserve_buffer: life_history.mean_reserve_buffer,
+            mean_reproductive_buffer: life_history.mean_reproductive_buffer,
+            max_reproductive_buffer: life_history.max_reproductive_buffer,
+            mean_recent_assimilation: life_history.mean_recent_assimilation,
+            mean_brood_cooldown: life_history.mean_brood_cooldown,
+            reproduction_ready_count: life_history.reproduction_ready_count,
+            rolling_pelagic_consumer_intake: self.rolling_pelagic_consumer_intake,
             rolling_producer_npp: instant.rolling_producer_npp,
             rolling_consumer_intake: instant.rolling_consumer_intake,
             rolling_consumer_maintenance: instant.rolling_consumer_maintenance,
@@ -277,6 +328,7 @@ impl super::AquariumSim {
         self.prev_time_of_day = self.env.time_of_day;
         self.pending_births.clear();
         self.rolling_producer_npp = 0.0;
+        self.rolling_pelagic_consumer_intake = 0.0;
         self.rolling_consumer_intake = 0.0;
         self.rolling_consumer_maintenance = 0.0;
         self.pending_labile_detritus_energy = 0.0;
@@ -292,5 +344,152 @@ impl super::AquariumSim {
 
     pub fn archived_daily_history(&self) -> &[DailyEcologySample] {
         &self.archived_daily_history
+    }
+
+    fn sample_consumer_stage_counts(&mut self) -> (usize, usize) {
+        let mut juvenile_count = 0usize;
+        let mut subadult_count = 0usize;
+
+        for state in &mut self.world.query::<&ConsumerState>() {
+            if state.is_adult() {
+                continue;
+            }
+            if state.maturity_progress >= SUBADULT_MATURITY_THRESHOLD {
+                subadult_count += 1;
+            } else {
+                juvenile_count += 1;
+            }
+        }
+
+        (juvenile_count, subadult_count)
+    }
+
+    fn sample_rooted_producer_summary(&mut self) -> (usize, f32) {
+        let mut rooted_producer_count = 0usize;
+        let mut rooted_producer_biomass = 0.0;
+
+        for state in &mut self.world.query::<(&ProducerState, &RootedMacrophyte)>() {
+            rooted_producer_count += 1;
+            rooted_producer_biomass += state.0.total_biomass();
+        }
+
+        (rooted_producer_count, rooted_producer_biomass)
+    }
+
+    fn sample_consumer_life_history(&mut self) -> ConsumerLifeHistorySummary {
+        let mut count = 0usize;
+        let mut maturity_total = 0.0;
+        let mut reserve_total = 0.0;
+        let mut reproductive_total = 0.0;
+        let mut max_reproductive_buffer: f32 = 0.0;
+        let mut recent_assimilation_total = 0.0;
+        let mut brood_cooldown_total = 0.0;
+        let mut reproduction_ready_count = 0usize;
+
+        for (energy, needs, genome, physics, state) in &mut self.world.query::<(
+            &Energy,
+            &Needs,
+            &CreatureGenome,
+            &DerivedPhysics,
+            &ConsumerState,
+        )>() {
+            count += 1;
+            maturity_total += state.maturity_progress;
+            reserve_total += state.reserve_buffer;
+            reproductive_total += state.reproductive_buffer;
+            max_reproductive_buffer = max_reproductive_buffer.max(state.reproductive_buffer);
+            recent_assimilation_total += state.recent_assimilation;
+            brood_cooldown_total += state.brood_cooldown;
+
+            let reserve_threshold = consumer_reproduction_reserve_threshold(physics, genome);
+            let reproductive_threshold = consumer_reproductive_threshold(physics, genome);
+            if state.is_adult()
+                && state.brood_cooldown <= 0.0
+                && state.reproductive_buffer >= reproductive_threshold
+                && needs.reproduction > 0.22
+                && energy.fraction() > reserve_threshold
+            {
+                reproduction_ready_count += 1;
+            }
+        }
+
+        if count == 0 {
+            return ConsumerLifeHistorySummary::default();
+        }
+
+        let denom = count as f32;
+        ConsumerLifeHistorySummary {
+            mean_maturity_progress: maturity_total / denom,
+            mean_reserve_buffer: reserve_total / denom,
+            mean_reproductive_buffer: reproductive_total / denom,
+            max_reproductive_buffer,
+            mean_recent_assimilation: recent_assimilation_total / denom,
+            mean_brood_cooldown: brood_cooldown_total / denom,
+            reproduction_ready_count,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::SeedableRng;
+
+    #[test]
+    fn test_daily_diagnostics_capture_consumer_life_history_state() {
+        let mut sim = crate::AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+        sim.record_daily_diagnostics();
+
+        let sample = sim
+            .archived_daily_history()
+            .last()
+            .expect("daily diagnostics should append an archived sample");
+
+        assert!(sample.creature_count > 0);
+        assert!(sample.mean_maturity_progress > 0.0);
+        assert!(sample.mean_reserve_buffer > 0.0);
+        assert!(sample.mean_reproductive_buffer >= 0.0);
+        assert!(sample.max_reproductive_buffer >= sample.mean_reproductive_buffer);
+        assert!(sample.mean_recent_assimilation >= 0.0);
+        assert!(sample.mean_brood_cooldown >= 0.0);
+        assert!(sample.reproduction_ready_count <= sample.creature_count);
+        assert!(sample.subadult_count <= sample.creature_count);
+    }
+
+    #[test]
+    fn test_daily_diagnostics_distinguish_juveniles_from_subadults() {
+        let mut sim = crate::AquariumSim::new(32, 12);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+
+        for (maturity_progress, matured_once) in [(0.40, false), (0.92, false), (1.0, true)] {
+            let genome = crate::genome::CreatureGenome::minimal_cell(&mut rng);
+            let physics = crate::phenotype::derive_physics(&genome);
+            sim.world.spawn((
+                crate::ecosystem::Energy::new(physics.max_energy),
+                crate::needs::Needs::default(),
+                genome,
+                physics,
+                crate::components::ConsumerState {
+                    reserve_buffer: 0.35,
+                    maturity_progress,
+                    matured_once,
+                    reproductive_buffer: 0.0,
+                    brood_cooldown: 0.0,
+                    recent_assimilation: 0.0,
+                },
+            ));
+        }
+
+        sim.recompute_cached_stats();
+        sim.record_daily_diagnostics();
+
+        let sample = sim
+            .archived_daily_history()
+            .last()
+            .expect("daily diagnostics should append an archived sample");
+
+        assert_eq!(sample.creature_count, 3);
+        assert_eq!(sample.juvenile_count, 1);
+        assert_eq!(sample.subadult_count, 1);
     }
 }

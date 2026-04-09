@@ -98,7 +98,13 @@ pub trait EcosystemSystem {
     fn tick_aging(&self, world: &mut hecs::World);
 
     /// Update maturation, reproductive buffer, and consumer needs.
-    fn tick_consumer_lifecycle(&self, world: &mut hecs::World, dt: f32);
+    fn tick_consumer_lifecycle(
+        &self,
+        world: &mut hecs::World,
+        dt: f32,
+        tank_width: f32,
+        tank_height: f32,
+    );
 
     /// Remove dead entities and recycle nutrients.
     fn tick_death(&self, world: &mut hecs::World) -> DeathResult;
@@ -144,8 +150,14 @@ impl EcosystemSystem for AllometricEcosystem {
         ecosystem::age_system(world);
     }
 
-    fn tick_consumer_lifecycle(&self, world: &mut hecs::World, dt: f32) {
-        ecosystem::consumer_life_history_system(world, dt);
+    fn tick_consumer_lifecycle(
+        &self,
+        world: &mut hecs::World,
+        dt: f32,
+        tank_width: f32,
+        tank_height: f32,
+    ) {
+        ecosystem::consumer_life_history_system(world, dt, tank_width, tank_height);
     }
 
     fn tick_death(&self, world: &mut hecs::World) -> DeathResult {

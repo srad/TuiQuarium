@@ -476,7 +476,11 @@ pub fn render_help_popup(frame: &mut Frame, area: Rect) {
 /// Render a small transient notification popup (centered near the top).
 pub fn render_flash_popup(frame: &mut Frame, area: Rect, message: &str) {
     let max_popup_w = area.width.saturating_sub(4).clamp(24, 84);
-    let longest_line = message.lines().map(|line| line.chars().count()).max().unwrap_or(0);
+    let longest_line = message
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
     let popup_w = (longest_line as u16 + 4).min(max_popup_w).min(area.width);
     let content_w = popup_w.saturating_sub(2).max(1) as usize;
     let wrapped_lines: u16 = message
@@ -498,14 +502,14 @@ pub fn render_flash_popup(frame: &mut Frame, area: Rect, message: &str) {
         .style(Style::default().bg(Color::Black));
 
     let text = Paragraph::new(message)
-    .block(block)
-    .alignment(Alignment::Center)
-    .wrap(Wrap { trim: false })
-    .style(
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    );
+        .block(block)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false })
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
 
     frame.render_widget(Clear, popup_area);
     frame.render_widget(text, popup_area);

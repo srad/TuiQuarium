@@ -168,7 +168,9 @@ impl super::AquariumSim {
         };
         let energy = Energy::new_with(initial_energy, physics.max_energy);
         let stage = producer_lifecycle::compute_stage(&genome, &state, &energy, &age);
-        let (appearance, bbox) = producer_lifecycle::build_appearance_from_genome(&genome, stage);
+        let rooted = propagule_kind.is_some();
+        let (appearance, bbox) =
+            producer_lifecycle::build_appearance_from_genome(&genome, stage, rooted);
 
         let entity = self.world.spawn((
             pos,
@@ -565,7 +567,8 @@ impl super::AquariumSim {
         if let Ok(mut live_stage) = self.world.get::<&mut ProducerStage>(entity) {
             *live_stage = stage;
         }
-        let (appearance, bbox) = producer_lifecycle::build_appearance_from_genome(genome, stage);
+        let (appearance, bbox) =
+            producer_lifecycle::build_appearance_from_genome(genome, stage, true);
         let _ = self
             .world
             .insert(entity, (appearance, bbox, AnimationState::new(0.8)));
@@ -595,50 +598,50 @@ impl super::AquariumSim {
             brood_cooldown,
             hunger,
             energy_fraction,
-        ): (f32, f32, f32, f32, f32, f32, f32, f32, f32) = match cohort_index {
+        ): (f32, f32, f32, f32, f32, f32, f32, f32, f32) = match cohort_index % 4 {
             0 => (
-                0.82 + self.rng.random_range(0.0..0.08),
-                0.26 + self.rng.random_range(0.0..0.04),
+                0.36 + self.rng.random_range(0.0..0.08),
+                0.66 + self.rng.random_range(0.0..0.08),
                 1.0,
-                0.68 + self.rng.random_range(0.0..0.06),
-                threshold * (0.90 + self.rng.random_range(0.0..0.08)),
-                0.08 + self.rng.random_range(0.0..0.04),
-                self.rng.random_range(0.0..6.0),
-                0.26 + self.rng.random_range(0.0..0.08),
-                0.76 + self.rng.random_range(0.0..0.08),
+                0.66 + self.rng.random_range(0.0..0.08),
+                threshold * (0.50 + self.rng.random_range(0.0..0.12)),
+                0.10 + self.rng.random_range(0.0..0.04),
+                305.0 + self.rng.random_range(0.0..30.0),
+                0.16 + self.rng.random_range(0.0..0.05),
+                0.78 + self.rng.random_range(0.0..0.08),
             ),
             1 => (
-                0.70 + self.rng.random_range(0.0..0.10),
-                0.34 + self.rng.random_range(0.0..0.05),
+                0.78 + self.rng.random_range(0.0..0.08),
+                0.40 + self.rng.random_range(0.0..0.08),
                 1.0,
-                0.62 + self.rng.random_range(0.0..0.08),
-                threshold * (0.45 + self.rng.random_range(0.0..0.15)),
-                0.07 + self.rng.random_range(0.0..0.03),
-                16.0 + self.rng.random_range(0.0..12.0),
-                0.30 + self.rng.random_range(0.0..0.08),
-                0.74 + self.rng.random_range(0.0..0.08),
-            ),
-            2 => (
-                0.14 + self.rng.random_range(0.0..0.08),
-                0.70 + self.rng.random_range(0.0..0.08),
-                0.56 + self.rng.random_range(0.0..0.16),
-                0.42 + self.rng.random_range(0.0..0.10),
-                threshold * (0.12 + self.rng.random_range(0.0..0.10)),
-                0.05 + self.rng.random_range(0.0..0.03),
-                20.0 + self.rng.random_range(0.0..16.0),
-                0.40 + self.rng.random_range(0.0..0.10),
+                0.54 + self.rng.random_range(0.0..0.08),
+                threshold * (0.18 + self.rng.random_range(0.0..0.10)),
+                0.08 + self.rng.random_range(0.0..0.04),
+                320.0 + self.rng.random_range(0.0..40.0),
+                0.24 + self.rng.random_range(0.0..0.08),
                 0.68 + self.rng.random_range(0.0..0.08),
             ),
+            2 => (
+                0.22 + self.rng.random_range(0.0..0.10),
+                0.84 + self.rng.random_range(0.0..0.08),
+                0.72 + self.rng.random_range(0.0..0.12),
+                0.50 + self.rng.random_range(0.0..0.10),
+                threshold * (0.10 + self.rng.random_range(0.0..0.10)),
+                0.07 + self.rng.random_range(0.0..0.04),
+                320.0 + self.rng.random_range(0.0..40.0),
+                0.30 + self.rng.random_range(0.0..0.10),
+                0.72 + self.rng.random_range(0.0..0.08),
+            ),
             _ => (
-                0.02 + self.rng.random_range(0.0..0.04),
-                0.82 + self.rng.random_range(0.0..0.08),
-                0.10 + self.rng.random_range(0.0..0.12),
-                0.26 + self.rng.random_range(0.0..0.12),
-                threshold * self.rng.random_range(0.0..0.20),
-                0.01 + self.rng.random_range(0.0..0.03),
-                24.0 + self.rng.random_range(0.0..24.0),
-                0.46 + self.rng.random_range(0.0..0.10),
-                0.62 + self.rng.random_range(0.0..0.10),
+                0.04 + self.rng.random_range(0.0..0.08),
+                0.94 + self.rng.random_range(0.0..0.06),
+                0.22 + self.rng.random_range(0.0..0.14),
+                0.36 + self.rng.random_range(0.0..0.10),
+                threshold * self.rng.random_range(0.0..0.14),
+                0.04 + self.rng.random_range(0.0..0.03),
+                320.0 + self.rng.random_range(0.0..40.0),
+                0.34 + self.rng.random_range(0.0..0.10),
+                0.68 + self.rng.random_range(0.0..0.10),
             ),
         };
 
@@ -673,17 +676,20 @@ impl super::AquariumSim {
     pub fn bootstrap_ecosystem(&mut self) -> Vec<hecs::Entity> {
         let tw = self.tank_width as f32;
         let th = self.tank_height as f32;
-        let target_producers = self.calibration.ecology.target_producer_count(
-            self.tank_width,
-            self.tank_height,
-            self.max_producers(),
-        );
+        let startup_targets = self.startup_targets();
+        let max_producers = self.max_producers();
+        let target_producers = startup_targets.target_producer_count.min(max_producers);
+        let target_producer_biomass = startup_targets.target_macrophyte_biomass;
         let spacing = self.calibration.ecology.founder_spacing;
 
         let mut seeded = 0usize;
         let mut attempts = 0usize;
+        let mut producer_biomass = 0.0_f32;
         let producer_y = self.rooted_settlement_y();
-        while seeded < target_producers && attempts < target_producers * 12 {
+        while seeded < max_producers
+            && attempts < max_producers * 12
+            && (seeded < target_producers || producer_biomass < target_producer_biomass)
+        {
             attempts += 1;
             let frac = (seeded as f32 + 0.5) / target_producers.max(1) as f32;
             let x =
@@ -711,6 +717,9 @@ impl super::AquariumSim {
                 Some(founder_kind),
             );
             self.initialize_founder_producer(entity, &genome, seeded);
+            if let Ok(state) = self.world.get::<&ProducerState>(entity) {
+                producer_biomass += state.total_biomass();
+            }
             seeded += 1;
         }
 
@@ -718,10 +727,8 @@ impl super::AquariumSim {
         let producer_biomass = self.cached_producer_leaf_biomass
             + self.cached_producer_structural_biomass
             + self.cached_producer_belowground_reserve;
-        let target_consumer_biomass = self
-            .calibration
-            .ecology
-            .target_consumer_biomass(producer_biomass, self.cached_producer_leaf_biomass);
+        let target_consumer_biomass =
+            startup_targets.consumer_biomass_for_macrophytes(producer_biomass);
         let producer_positions: Vec<Position> = (&mut self.world.query::<(Entity, &Position)>())
             .into_iter()
             .filter_map(|(entity, pos)| {
@@ -732,14 +739,14 @@ impl super::AquariumSim {
                 }
             })
             .collect();
-        let initial_detritus_energy = (self.cached_producer_leaf_biomass * 0.12)
-            .clamp(0.0, self.cached_producer_leaf_biomass * 0.35);
+        let initial_detritus_energy =
+            startup_targets.detritus_energy_for_macrophytes(producer_biomass);
         let mut remaining_detritus_energy = initial_detritus_energy;
         let detritus_packet_energy = 1.2;
         let detritus_packets = ((remaining_detritus_energy / detritus_packet_energy).floor()
             as usize)
             .min(producer_positions.len().max(1))
-            .min(5);
+            .min(startup_targets.target_producer_count.max(1));
         // Research note: real aquatic founder webs begin with a detrital /
         // dissolved-organic background rather than perfectly clean water (Azam
         // et al., 1983), so the bootstrap seeds a modest labile detritus pool
@@ -761,12 +768,8 @@ impl super::AquariumSim {
             self.spawn_detritus(x, y, detritus_packet_energy);
             remaining_detritus_energy -= detritus_packet_energy;
         }
-        let min_founders = self.calibration.ecology.min_consumer_founders;
-        let max_founders = self
-            .calibration
-            .ecology
-            .max_consumer_founders
-            .max(min_founders);
+        let min_founders = startup_targets.target_consumer_founders.max(4);
+        let max_founders = min_founders + 2;
         let mut seeded_consumers = Vec::with_capacity(max_founders);
         let mut total_consumer_biomass = 0.0;
         while seeded_consumers.len() < max_founders

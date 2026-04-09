@@ -45,6 +45,7 @@ use hecs::Entity;
 use std::collections::{HashMap, VecDeque};
 
 pub use calibration::{EcologyCalibration, EvolutionCalibration, RuntimeCalibration};
+pub use ecology_equilibrium::EquilibriumStartupTargets;
 pub use stats::{DailyEcologySample, EcologyDiagnostics, EcologyInstant, SimStats};
 
 /// Pre-computed entity info shared across brain, boids, and hunting systems per tick.
@@ -136,6 +137,7 @@ pub struct AquariumSim {
     cached_juvenile_count: usize,
     cached_adult_count: usize,
     rolling_producer_npp: f32,
+    rolling_pelagic_consumer_intake: f32,
     rolling_consumer_intake: f32,
     rolling_consumer_maintenance: f32,
     pending_labile_detritus_energy: f32,
@@ -206,6 +208,11 @@ impl AquariumSim {
     ) -> Self {
         use rand::RngExt;
         let substrate_seed: u64 = rng.random();
+        let startup_targets =
+            ecology_equilibrium::ReducedEquilibriumModel::default_startup_targets(
+                tank_width,
+                tank_height,
+            );
         Self {
             world: hecs::World::new(),
             env: Environment::default(),
@@ -225,7 +232,13 @@ impl AquariumSim {
             innovation_tracker: InnovationTracker::new(),
             pheromone_grid: pheromone::PheromoneGrid::new(tank_width as f32, tank_height as f32),
             light_field: LightField::new(tank_width, tank_height),
-            nutrients: NutrientPool::default(),
+            nutrients: NutrientPool {
+                dissolved_n: startup_targets.dissolved_n,
+                dissolved_p: startup_targets.dissolved_p,
+                sediment_n: startup_targets.sediment_n,
+                sediment_p: startup_targets.sediment_p,
+                phytoplankton_load: startup_targets.phytoplankton_load,
+            },
             substrate: SubstrateGrid::generate(tank_width, substrate_seed),
             pending_births: Vec::new(),
             brain_system: NeatBrainSystem,
@@ -245,6 +258,7 @@ impl AquariumSim {
             cached_juvenile_count: 0,
             cached_adult_count: 0,
             rolling_producer_npp: 0.0,
+            rolling_pelagic_consumer_intake: 0.0,
             rolling_consumer_intake: 0.0,
             rolling_consumer_maintenance: 0.0,
             pending_labile_detritus_energy: 0.0,
@@ -263,6 +277,14 @@ impl AquariumSim {
 
     pub fn calibration(&self) -> RuntimeCalibration {
         self.calibration
+    }
+
+    pub fn default_startup_targets(tank_width: u16, tank_height: u16) -> EquilibriumStartupTargets {
+        ecology_equilibrium::ReducedEquilibriumModel::default_startup_targets(tank_width, tank_height)
+    }
+
+    pub(crate) fn startup_targets(&self) -> EquilibriumStartupTargets {
+        Self::default_startup_targets(self.tank_width, self.tank_height)
     }
 
     /// Mutable access to the ECS world for spawning entities from outside.
@@ -564,11 +586,14 @@ impl Simulation for AquariumSim {
         self.spawn_labile_detritus_from_producers();
         self.ecosystem_system.tick_aging(&mut self.world);
         self.ecosystem_system
-            .tick_consumer_lifecycle(&mut self.world, dt);
+            .tick_consumer_lifecycle(&mut self.world, dt, tw, th);
 
         let smoothing = Self::smoothing_factor(dt, 75.0);
         self.rolling_producer_npp +=
             (producer_flux.net_primary_production - self.rolling_producer_npp) * smoothing;
+        self.rolling_pelagic_consumer_intake +=
+            (producer_flux.pelagic_consumer_intake - self.rolling_pelagic_consumer_intake)
+                * smoothing;
         self.rolling_consumer_maintenance +=
             (flux.consumer_maintenance - self.rolling_consumer_maintenance) * smoothing;
 
@@ -585,7 +610,9 @@ impl Simulation for AquariumSim {
             * smoothing;
 
         // 9. Creature reproduction (with population cap)
-        let creature_count = self.cached_creature_count;
+        let creature_count = (&mut self.world.query::<&CreatureGenome>())
+            .into_iter()
+            .count();
         self.innovation_tracker.new_generation();
         let births = self.reproduction_system.reproduce_creatures(
             &mut self.world,
@@ -2353,7 +2380,7 @@ mod tests {
         sim.bootstrap_founder_web();
 
         let stats = sim.stats();
-        let min_founders = sim.calibration().ecology.min_consumer_founders;
+        let startup_targets = sim.startup_targets();
         let complexities: Vec<f32> = (&mut sim.world.query::<&CreatureGenome>())
             .into_iter()
             .map(|genome| genome.complexity)
@@ -2364,10 +2391,10 @@ mod tests {
             "Default bootstrap should seed consumers"
         );
         assert!(
-            stats.creature_count >= min_founders,
-            "Default bootstrap should seed at least the configured minimum visible founders, got {} with minimum {}",
+            stats.creature_count >= startup_targets.target_consumer_founders,
+            "Default bootstrap should seed at least the solver-derived visible founders, got {} with minimum {}",
             stats.creature_count,
-            min_founders,
+            startup_targets.target_consumer_founders,
         );
         assert!(
             stats.producer_leaf_biomass
@@ -2853,12 +2880,12 @@ mod tests {
             "Startup transient should not wipe out consumers in the first 15 days"
         );
         assert!(
-            day_five_n >= 6.8,
+            day_five_n >= 4.0,
             "Startup dissolved N should stay buffered by day 5, got {:.2}",
             day_five_n,
         );
         assert!(
-            day_five_p >= 1.5,
+            day_five_p >= 0.5,
             "Startup dissolved P should stay buffered by day 5, got {:.2}",
             day_five_p,
         );
@@ -2880,18 +2907,11 @@ mod tests {
         let mut consumer_positive_days = 0usize;
         let mut juvenile_days = 0usize;
         let mut peak_creature_count = 0usize;
-        let mut first_birth_day = None;
-        let mut prev_creature_births = 0u64;
 
         for tick in 0..(ticks_per_day * 120) {
             sim.tick(dt);
             if (tick + 1) % ticks_per_day == 0 {
-                let day = (tick + 1) / ticks_per_day;
                 let stats = sim.stats();
-                if first_birth_day.is_none() && stats.creature_births > prev_creature_births {
-                    first_birth_day = Some(day as u64);
-                }
-                prev_creature_births = stats.creature_births;
                 if stats.creature_count > 0 && stats.consumer_biomass > 0.4 {
                     consumer_positive_days += 1;
                 }
@@ -2903,10 +2923,10 @@ mod tests {
         }
 
         let stats = sim.stats();
+        let archived = sim.archived_daily_history();
         let (equilibrium_model, equilibrium_target) =
             crate::ecology_equilibrium::ReducedEquilibriumModel::reference_clearwater();
-        let equilibrium_window: Vec<_> = sim
-            .archived_daily_history()
+        let equilibrium_window: Vec<_> = archived
             .iter()
             .filter(|sample| sample.day >= 30)
             .cloned()
@@ -2916,11 +2936,60 @@ mod tests {
             .expect("realism run should accumulate archived daily history after day 30");
         let reference_observables =
             equilibrium_model.reference_observable_metrics(equilibrium_target);
+        let post_bootstrap_birth_day = archived
+            .iter()
+            .find(|sample| sample.day > 10 && sample.creature_births_delta > 0)
+            .map(|sample| sample.day);
+        let final_day = archived.last().map(|sample| sample.day).unwrap_or(0);
+        let tail_start = final_day.saturating_sub(49);
+        let tail_window: Vec<_> = archived
+            .iter()
+            .filter(|sample| sample.day >= tail_start)
+            .collect();
+        let tail_len = tail_window.len().max(1) as f32;
+        let tail_mean_assimilation = tail_window
+            .iter()
+            .map(|sample| sample.mean_recent_assimilation)
+            .sum::<f32>()
+            / tail_len;
+        let tail_juvenile_days = tail_window
+            .iter()
+            .filter(|sample| sample.juvenile_count > 0)
+            .count();
+        let tail_recruitment_signal_days = tail_window
+            .iter()
+            .filter(|sample| {
+                sample.juvenile_count > 0
+                    || sample.subadult_count > 0
+                    || sample.creature_births_delta > 0
+                    || sample.reproduction_ready_count > 0
+            })
+            .count();
+        let tail_birth_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_births_delta > 0)
+            .count();
+        let tail_death_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_deaths_delta > 0)
+            .count();
+        let tail_ready_days = tail_window
+            .iter()
+            .filter(|sample| sample.reproduction_ready_count > 0)
+            .count();
+        let near_peak_tail_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_count >= peak_creature_count.saturating_sub(1))
+            .count();
+        let static_adult_plateau = tail_birth_days == 0
+            && tail_death_days == 0
+            && tail_ready_days == 0
+            && near_peak_tail_days + 5 >= tail_window.len();
 
         assert!(
-            first_birth_day.unwrap_or(u64::MAX) <= 45,
-            "Realistic lake should show the first consumer birth by day 45, got {:?}",
-            first_birth_day,
+            post_bootstrap_birth_day.unwrap_or(u64::MAX) <= 70,
+            "Realistic lake should show a post-bootstrap consumer birth by day 70 under the near-equilibrium startup, got {:?}",
+            post_bootstrap_birth_day,
         );
         assert!(
             stats.creature_deaths >= 2,
@@ -2938,7 +3007,30 @@ mod tests {
             juvenile_days,
         );
         assert!(
-            peak_creature_count <= 80,
+            tail_mean_assimilation >= 0.015,
+            "Realistic lake should keep late-run consumer assimilation above the maintenance trap, got {:.4}",
+            tail_mean_assimilation,
+        );
+        assert!(
+            tail_juvenile_days >= 3,
+            "Realistic lake should keep juveniles reappearing late in the run, got {} days",
+            tail_juvenile_days,
+        );
+        assert!(
+            tail_recruitment_signal_days >= 3,
+            "Realistic lake should keep late recruitment signals visible, got {} days",
+            tail_recruitment_signal_days,
+        );
+        assert!(
+            !static_adult_plateau,
+            "Realistic lake should not settle into a static adult plateau: tail_birth_days={} tail_death_days={} tail_ready_days={} near_peak_tail_days={}",
+            tail_birth_days,
+            tail_death_days,
+            tail_ready_days,
+            near_peak_tail_days,
+        );
+        assert!(
+            peak_creature_count <= 72,
             "Realistic lake should avoid dense swarms, got peak creature count {}",
             peak_creature_count,
         );
@@ -2946,6 +3038,255 @@ mod tests {
             equilibrium_model.observable_metrics_in_default_realism_band(mean_observables),
             "Mean archived ecology over days 30-120 should stay inside the reduced clear-water realism band. \
              mean={mean_observables:?} reference={reference_observables:?}",
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_recruits_consumers_across_seed_variation() {
+        let seeds = [7_u64, 42_u64];
+        let dt = 8.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+
+        for seed in seeds {
+            let mut sim = AquariumSim::new_seeded(80, 24, seed);
+            sim.bootstrap_founder_web();
+
+            let mut longest_zero_consumer_streak = 0usize;
+            let mut zero_consumer_streak = 0usize;
+
+            for tick in 0..(ticks_per_day * 90) {
+                sim.tick(dt);
+                if (tick + 1) % ticks_per_day == 0 {
+                    let stats = sim.stats();
+                    if stats.creature_count == 0 {
+                        zero_consumer_streak += 1;
+                        longest_zero_consumer_streak =
+                            longest_zero_consumer_streak.max(zero_consumer_streak);
+                    } else {
+                        zero_consumer_streak = 0;
+                    }
+                }
+            }
+
+            let stats = sim.stats();
+            let archived = sim.archived_daily_history();
+            let post_bootstrap_birth_day = archived
+                .iter()
+                .find(|sample| sample.day > 10 && sample.creature_births_delta > 0)
+                .map(|sample| sample.day);
+            let late_recruitment_signal_days = archived
+                .iter()
+                .filter(|sample| {
+                    sample.day > 40
+                        && (sample.juvenile_count > 0
+                            || sample.subadult_count > 0
+                            || sample.creature_births_delta > 0
+                            || sample.reproduction_ready_count > 0)
+                })
+                .count();
+            assert!(
+                stats.creature_births > 0,
+                "Default bootstrap should not stay founder-only for seed {seed}. \
+                 births={} deaths={} final_creatures={} final_biomass={:.2}",
+                stats.creature_births,
+                stats.creature_deaths,
+                stats.creature_count,
+                stats.consumer_biomass,
+            );
+            assert!(
+                post_bootstrap_birth_day.unwrap_or(u64::MAX) <= 90,
+                "Default bootstrap should recruit consumers after bootstrap by day 90 for seed {seed}, got {:?}",
+                post_bootstrap_birth_day,
+            );
+            assert!(
+                longest_zero_consumer_streak <= 10,
+                "Default bootstrap should not lose all consumers for long streaks under seed {seed}, got {} days",
+                longest_zero_consumer_streak,
+            );
+            assert!(
+                late_recruitment_signal_days > 0,
+                "Default bootstrap should keep late recruitment signals reappearing after day 40 for seed {seed}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_bootstrap_app_size_avoids_ready_adult_swarm_at_160_days() {
+        let mut sim = AquariumSim::new_seeded(136, 44, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 10.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        let mut peak_creature_count = 0usize;
+
+        for tick in 0..(ticks_per_day * 160) {
+            sim.tick(dt);
+            if (tick + 1) % ticks_per_day == 0 {
+                peak_creature_count = peak_creature_count.max(sim.stats().creature_count);
+            }
+        }
+
+        let archived = sim.archived_daily_history();
+        let final_day = archived.last().map(|sample| sample.day).unwrap_or(0);
+        let tail_start = final_day.saturating_sub(49);
+        let tail_window: Vec<_> = archived
+            .iter()
+            .filter(|sample| sample.day >= tail_start)
+            .collect();
+        let tail_mean_creature_count = tail_window
+            .iter()
+            .map(|sample| sample.creature_count as f32)
+            .sum::<f32>()
+            / tail_window.len().max(1) as f32;
+        let tail_ready_days = tail_window
+            .iter()
+            .filter(|sample| sample.reproduction_ready_count > 0)
+            .count();
+        let tail_birth_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_births_delta > 0)
+            .count();
+        let tail_death_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_deaths_delta > 0)
+            .count();
+        let near_peak_tail_days = tail_window
+            .iter()
+            .filter(|sample| sample.creature_count >= peak_creature_count.saturating_sub(2))
+            .count();
+        let ready_adult_swarm = tail_ready_days >= 20
+            && tail_birth_days == 0
+            && tail_death_days <= 1
+            && near_peak_tail_days + 5 >= tail_window.len();
+
+        assert!(
+            peak_creature_count <= 120,
+            "App-size lake should avoid overcrowded swarms, got peak creature count {}",
+            peak_creature_count,
+        );
+        assert!(
+            tail_mean_creature_count <= 110.0,
+            "App-size lake should relax below a dense adult plateau, got tail mean creature count {:.1}",
+            tail_mean_creature_count,
+        );
+        assert!(
+            !ready_adult_swarm,
+            "App-size lake should not sustain a ready-adult swarm with no late births: tail_ready_days={} tail_birth_days={} tail_death_days={} near_peak_tail_days={}",
+            tail_ready_days,
+            tail_birth_days,
+            tail_death_days,
+            near_peak_tail_days,
+        );
+    }
+
+    #[test]
+    fn test_default_bootstrap_app_size_preserves_rooted_producers_and_bounds_nitrogen() {
+        let mut sim = AquariumSim::new_seeded(136, 44, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 10.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        for _ in 0..(ticks_per_day * 200) {
+            sim.tick(dt);
+        }
+
+        let archived = sim.archived_daily_history();
+        let final_day = archived.last().map(|sample| sample.day).unwrap_or(0);
+        let tail_start = final_day.saturating_sub(49);
+        let tail_window: Vec<_> = archived
+            .iter()
+            .filter(|sample| sample.day >= tail_start)
+            .collect();
+        let tail_len = tail_window.len().max(1) as f32;
+        let tail_mean_rooted_biomass = tail_window
+            .iter()
+            .map(|sample| sample.rooted_producer_biomass)
+            .sum::<f32>()
+            / tail_len;
+        let tail_mean_rooted_count = tail_window
+            .iter()
+            .map(|sample| sample.rooted_producer_count as f32)
+            .sum::<f32>()
+            / tail_len;
+        let tail_mean_pelagic_intake = tail_window
+            .iter()
+            .map(|sample| sample.rolling_pelagic_consumer_intake)
+            .sum::<f32>()
+            / tail_len;
+        let tail_mean_phy = tail_window
+            .iter()
+            .map(|sample| sample.phytoplankton_load)
+            .sum::<f32>()
+            / tail_len;
+        let tail_max_dissolved_n = tail_window
+            .iter()
+            .map(|sample| sample.dissolved_n)
+            .fold(0.0_f32, f32::max);
+
+        assert!(
+            tail_mean_rooted_biomass > 12.0,
+            "App-size lake should preserve a visible rooted producer stand, got tail mean rooted biomass {:.2}",
+            tail_mean_rooted_biomass,
+        );
+        assert!(
+            tail_mean_rooted_count >= 6.0,
+            "App-size lake should keep multiple rooted producer colonies alive, got tail mean rooted count {:.1}",
+            tail_mean_rooted_count,
+        );
+        assert!(
+            tail_max_dissolved_n <= 120.0,
+            "App-size lake should keep dissolved N bounded, got tail max {:.2}",
+            tail_max_dissolved_n,
+        );
+        if tail_mean_phy <= 0.02 {
+            assert!(
+                tail_mean_pelagic_intake <= 0.5,
+                "App-size lake should not show phantom pelagic intake when phytoplankton is absent: phy={:.4} intake={:.4}",
+                tail_mean_phy,
+                tail_mean_pelagic_intake,
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "app-size ecology long soak"]
+    fn test_default_bootstrap_app_size_long_soak_avoids_producer_collapse() {
+        let mut sim = AquariumSim::new_seeded(136, 44, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 10.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        for _ in 0..(ticks_per_day * 500) {
+            sim.tick(dt);
+        }
+
+        let archived = sim.archived_daily_history();
+        let final_day = archived.last().map(|sample| sample.day).unwrap_or(0);
+        let tail_start = final_day.saturating_sub(79);
+        let tail_window: Vec<_> = archived
+            .iter()
+            .filter(|sample| sample.day >= tail_start)
+            .collect();
+        let tail_len = tail_window.len().max(1) as f32;
+        let tail_mean_rooted_biomass = tail_window
+            .iter()
+            .map(|sample| sample.rooted_producer_biomass)
+            .sum::<f32>()
+            / tail_len;
+        let tail_max_dissolved_n = tail_window
+            .iter()
+            .map(|sample| sample.dissolved_n)
+            .fold(0.0_f32, f32::max);
+
+        assert!(
+            tail_mean_rooted_biomass > 10.0,
+            "App-size long soak should not lose the rooted producer stand, got tail mean rooted biomass {:.2}",
+            tail_mean_rooted_biomass,
+        );
+        assert!(
+            tail_max_dissolved_n <= 160.0,
+            "App-size long soak should not drift into extreme nitrogen runaway, got tail max {:.2}",
+            tail_max_dissolved_n,
         );
     }
 
@@ -3044,6 +3385,35 @@ mod tests {
     fn test_diversity_coefficient_defaults_to_one() {
         let sim = AquariumSim::new_seeded(80, 24, 42);
         assert!((sim.diversity_coefficient() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_new_seeded_uses_equilibrium_derived_startup_nutrients() {
+        let sim = AquariumSim::new_seeded(48, 16, 42);
+        let targets = AquariumSim::default_startup_targets(48, 16);
+
+        assert!((sim.nutrients.dissolved_n - targets.dissolved_n).abs() < 1e-4);
+        assert!((sim.nutrients.dissolved_p - targets.dissolved_p).abs() < 1e-4);
+        assert!((sim.nutrients.sediment_n - targets.sediment_n).abs() < 1e-4);
+        assert!((sim.nutrients.sediment_p - targets.sediment_p).abs() < 1e-4);
+        assert!((sim.nutrients.phytoplankton_load - targets.phytoplankton_load).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_default_bootstrap_does_not_produce_day_one_consumer_births() {
+        let mut sim = AquariumSim::new_seeded(48, 16, 42);
+        sim.bootstrap_founder_web();
+
+        let dt = 4.0;
+        let ticks_per_day = (300.0 / dt) as usize;
+        for _ in 0..ticks_per_day {
+            sim.tick(dt);
+        }
+
+        assert_eq!(
+            sim.stats().creature_births, 0,
+            "Default startup should not rely on immediate day-one founder births"
+        );
     }
 
     #[test]

@@ -65,7 +65,8 @@ pub fn producer_lifecycle_system(world: &mut hecs::World, dt: f32) {
     }
 
     for (entity, genome, stage, bottom_anchor) in updates {
-        let (appearance, bbox) = build_appearance_from_genome(&genome, stage);
+        let rooted = bottom_anchor.is_some();
+        let (appearance, bbox) = build_appearance_from_genome(&genome, stage, rooted);
         let new_bottom = bottom_anchor.map(|bottom| (bottom - bbox.h + 1.0).max(0.0));
         let _ = world.insert(entity, (appearance, bbox, AnimationState::new(0.8)));
         if let Some(new_y) = new_bottom {
@@ -80,8 +81,9 @@ pub fn producer_lifecycle_system(world: &mut hecs::World, dt: f32) {
 pub fn build_appearance_from_genome(
     genome: &ProducerGenome,
     stage: ProducerStage,
+    rooted: bool,
 ) -> (Appearance, BoundingBox) {
-    let (rows, sway_rows) = generate_producer_art(genome, stage);
+    let (rows, sway_rows) = generate_producer_art(genome, stage, rooted);
 
     let w = rows.iter().map(|r| r.len()).max().unwrap_or(1) as f32;
     let h = rows.len() as f32;
@@ -101,7 +103,11 @@ pub fn build_appearance_from_genome(
 fn generate_producer_art(
     genome: &ProducerGenome,
     stage: ProducerStage,
+    rooted: bool,
 ) -> (Vec<String>, Vec<String>) {
+    if rooted && matches!(stage, ProducerStage::Cell | ProducerStage::Patch) {
+        return rooted_sprout_art(stage);
+    }
     let complexity = genome.complexity.max(0.04);
     if complexity < 0.12 {
         speck_art(stage)
@@ -111,6 +117,20 @@ fn generate_producer_art(
         mat_art(genome, stage)
     } else {
         plume_art(genome, stage)
+    }
+}
+
+fn rooted_sprout_art(stage: ProducerStage) -> (Vec<String>, Vec<String>) {
+    match stage {
+        ProducerStage::Cell => (
+            vec!["'".to_string(), "|".to_string()],
+            vec!["`".to_string(), "|".to_string()],
+        ),
+        ProducerStage::Patch => (
+            vec![" ' ".to_string(), "\\|/".to_string()],
+            vec![" ` ".to_string(), "/|\\".to_string()],
+        ),
+        _ => speck_art(stage),
     }
 }
 
@@ -381,5 +401,30 @@ mod tests {
             (new_bottom - initial_bottom).abs() < 0.01,
             "Rooted producer should preserve bottom anchor: initial={initial_bottom:.2} new={new_bottom:.2}"
         );
+    }
+
+    #[test]
+    fn rooted_low_stage_art_rises_above_substrate() {
+        let genome = test_genome();
+
+        let (cell_appearance, cell_bbox) =
+            build_appearance_from_genome(&genome, ProducerStage::Cell, true);
+        let cell_rows = &cell_appearance.frame_sets[0][0].rows;
+        assert!(
+            cell_bbox.h >= 2.0,
+            "Rooted cell stage should render above the substrate, got height {}",
+            cell_bbox.h
+        );
+        assert_eq!(cell_rows, &vec!["'".to_string(), "|".to_string()]);
+
+        let (patch_appearance, patch_bbox) =
+            build_appearance_from_genome(&genome, ProducerStage::Patch, true);
+        let patch_rows = &patch_appearance.frame_sets[0][0].rows;
+        assert!(
+            patch_bbox.h >= 2.0,
+            "Rooted patch stage should render above the substrate, got height {}",
+            patch_bbox.h
+        );
+        assert_eq!(patch_rows, &vec![" ' ".to_string(), "\\|/".to_string()]);
     }
 }

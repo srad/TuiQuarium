@@ -11,7 +11,9 @@ use crate::boids::Boid;
 use crate::brain::{Brain, InnovationTracker};
 use crate::calibration::EvolutionCalibration;
 use crate::components::*;
-use crate::ecosystem::{consumer_reproductive_threshold, Age, Energy};
+use crate::ecosystem::{
+    consumer_reproduction_reserve_threshold, consumer_reproductive_threshold, Age, Energy,
+};
 use crate::genetics::{crossover, genomic_distance, mutate, CREATURE_SPECIES_THRESHOLD};
 use crate::genome::CreatureGenome;
 use crate::needs::{NeedWeights, Needs};
@@ -31,7 +33,11 @@ const MAX_BIRTHS_PER_TICK: usize = 2;
 /// Simple cells (complexity < 0.5) reproduce asexually.
 /// Complex creatures need a compatible mate nearby.
 fn max_population_for_tank(tank_w: f32, tank_h: f32) -> usize {
-    (((tank_w.max(1.0) * tank_h.max(1.0)).sqrt() * 2.6).round() as usize).clamp(48, 160)
+    crate::ecology_equilibrium::ReducedEquilibriumModel::default_startup_targets(
+        tank_w.max(1.0).round() as u16,
+        tank_h.max(1.0).round() as u16,
+    )
+    .soft_population_cap
 }
 
 pub fn reproduction_system(
@@ -50,6 +56,8 @@ pub fn reproduction_system(
     if creature_count >= max_population {
         return Vec::new();
     }
+    let remaining_capacity = max_population.saturating_sub(creature_count).max(1);
+    let max_births_this_tick = MAX_BIRTHS_PER_TICK.min(remaining_capacity);
     let crowding = creature_count as f32 / max_population.max(1) as f32;
 
     // Fitness sharing: group creatures into species and compute reproduction probability.
@@ -98,12 +106,12 @@ pub fn reproduction_system(
             &DerivedPhysics,
             &crate::components::ConsumerState,
         )>() {
-            let reserve_threshold = (0.50_f32 + 0.05 * genome.complexity).clamp(0.50, 0.62);
+            let reserve_threshold = consumer_reproduction_reserve_threshold(physics, genome);
             let reproductive_threshold = consumer_reproductive_threshold(physics, genome);
             if state.is_adult()
                 && state.brood_cooldown <= 0.0
                 && state.reproductive_buffer >= reproductive_threshold
-                && needs.reproduction > 0.30
+                && needs.reproduction > 0.22
                 && energy.fraction() > reserve_threshold
             {
                 v.push((
@@ -129,15 +137,15 @@ pub fn reproduction_system(
     for &(parent_a, ax, ay, _, _, complexity, mutation_factor, mate_pref, parent_threshold) in
         &candidates
     {
-        if births.len() >= MAX_BIRTHS_PER_TICK {
+        if births.len() >= max_births_this_tick {
             break;
         }
         if already_mated.contains(&parent_a) {
             continue;
         }
-        if crowding > 0.60 {
-            let suppression = ((crowding - 0.60) / 0.40).clamp(0.0, 1.0);
-            let allow = (1.0 - suppression * 0.88).clamp(0.08, 1.0);
+        if crowding > 0.40 {
+            let suppression = ((crowding - 0.40) / 0.40).clamp(0.0, 1.0);
+            let allow = (1.0 - suppression * 0.95).clamp(0.03, 1.0);
             if !rng.random_bool(allow as f64) {
                 continue;
             }
@@ -352,17 +360,17 @@ pub fn reproduction_system(
                 let generation_pace =
                     (1.15 - g.complexity * 0.38 - physics.body_mass.max(0.1).powf(0.28) * 0.14)
                         .clamp(0.62, 1.15);
-                (170.0 - g.behavior.reproduction_rate * 70.0) / generation_pace
+                (210.0 - g.behavior.reproduction_rate * 80.0) / generation_pace
             }
-            _ => 140.0,
+            _ => 170.0,
         };
         if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(parent_a) {
             state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-            state.brood_cooldown = parent_cooldown.max(110.0);
-            state.recent_assimilation *= 0.35;
+            state.brood_cooldown = parent_cooldown.max(140.0);
+            state.recent_assimilation *= 0.50;
         }
         if let Ok(mut e) = world.get::<&mut Energy>(parent_a) {
-            e.current -= e.max * 0.24;
+            e.current -= e.max * 0.30;
         }
         if let Ok(mut n) = world.get::<&mut Needs>(parent_a) {
             n.reproduction = 0.0;
@@ -377,17 +385,17 @@ pub fn reproduction_system(
                     let generation_pace =
                         (1.15 - g.complexity * 0.38 - physics.body_mass.max(0.1).powf(0.28) * 0.14)
                             .clamp(0.62, 1.15);
-                    (170.0 - g.behavior.reproduction_rate * 70.0) / generation_pace
+                    (210.0 - g.behavior.reproduction_rate * 80.0) / generation_pace
                 }
-                _ => 140.0,
+                _ => 170.0,
             };
             if let Ok(mut state) = world.get::<&mut crate::components::ConsumerState>(mate) {
                 state.reproductive_buffer = (state.reproductive_buffer - required_buffer).max(0.0);
-                state.brood_cooldown = mate_cooldown.max(110.0);
-                state.recent_assimilation *= 0.35;
+                state.brood_cooldown = mate_cooldown.max(140.0);
+                state.recent_assimilation *= 0.50;
             }
             if let Ok(mut e) = world.get::<&mut Energy>(mate) {
-                e.current -= e.max * 0.24;
+                e.current -= e.max * 0.30;
             }
             if let Ok(mut n) = world.get::<&mut Needs>(mate) {
                 n.reproduction = 0.0;
@@ -448,6 +456,7 @@ mod tests {
             (ConsumerState {
                 reserve_buffer: 0.85,
                 maturity_progress: 1.0,
+                matured_once: true,
                 reproductive_buffer: threshold * 1.3,
                 brood_cooldown: 0.0,
                 recent_assimilation: 0.3,

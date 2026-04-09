@@ -21,8 +21,7 @@ use crate::{
 
 const WINDOW_TITLE: &str = concat!("TuiQuarium ", env!("CARGO_PKG_VERSION"));
 const WINDOW_FONT_NAME: &str = "Cascadia Mono";
-const WINDOW_FONT_DATA: &[u8] =
-    include_bytes!("../crates/tuiq-render/fonts/CascadiaMono.ttf");
+const WINDOW_FONT_DATA: &[u8] = include_bytes!("../crates/tuiq-render/fonts/CascadiaMono.ttf");
 const WGPU_TARGET_COLUMNS: u16 = FIXED_TANK_WIDTH + 2;
 const WGPU_BASE_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + 3;
 const WGPU_DIAGNOSTIC_ROWS: u16 = FIXED_TANK_HEIGHT + 2 + MAX_DIAGNOSTIC_HUD_ROWS;
@@ -125,12 +124,7 @@ impl WgpuApp {
         Ok(())
     }
 
-    fn apply_terminal_layout(
-        &mut self,
-        width: u32,
-        height: u32,
-        event_loop: &ActiveEventLoop,
-    ) {
+    fn apply_terminal_layout(&mut self, width: u32, height: u32, event_loop: &ActiveEventLoop) {
         let Some(window) = self.window.clone() else {
             return;
         };
@@ -139,9 +133,9 @@ impl WgpuApp {
         }
 
         let display = self.state.display_state();
-        let desired =
-            self.font_metrics
-                .layout_for_window(width, height, display.show_diagnostics);
+        let desired = self
+            .font_metrics
+            .layout_for_window(width, height, display.show_diagnostics);
 
         if self.layout == Some(desired) {
             return;
@@ -274,6 +268,7 @@ fn action_from_key(key: &Key) -> Option<AppAction> {
     match key {
         Key::Named(NamedKey::Escape) => Some(AppAction::Quit),
         Key::Named(NamedKey::Enter) => Some(AppAction::Confirm),
+        Key::Named(NamedKey::Delete | NamedKey::Backspace) => Some(AppAction::DeleteSelection),
         Key::Named(NamedKey::Space) => Some(AppAction::TogglePause),
         Key::Named(NamedKey::ArrowRight) => Some(AppAction::IncreaseSpeed),
         Key::Named(NamedKey::ArrowLeft) => Some(AppAction::DecreaseSpeed),
@@ -398,12 +393,7 @@ impl WindowFontMetrics {
     }
 
     #[cfg(test)]
-    fn logical_size_for_font(
-        self,
-        width_px: u32,
-        height_px: u32,
-        font_size_px: u32,
-    ) -> (u32, u32) {
+    fn logical_size_for_font(self, width_px: u32, height_px: u32, font_size_px: u32) -> (u32, u32) {
         let font_size_px = font_size_px.max(1);
         (
             width_px / self.char_width_px(font_size_px),
@@ -546,7 +536,10 @@ mod tests {
             resize.take_settled(start + Duration::from_millis(160)),
             Some((900, 640))
         );
-        assert_eq!(resize.take_settled(start + Duration::from_millis(200)), None);
+        assert_eq!(
+            resize.take_settled(start + Duration::from_millis(200)),
+            None
+        );
     }
 
     #[test]

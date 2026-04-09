@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Terminal,
 };
 use uuid::Uuid;
@@ -80,6 +80,7 @@ enum AppAction {
     ExportHistory,
     ToggleRecording,
     NextTheme,
+    DeleteSelection,
 }
 
 fn action_allows_repeat(action: AppAction) -> bool {
@@ -263,6 +264,7 @@ impl SessionState {
                 self.renderer
                     .flash_message(format!("Theme: {}", self.theme.label()));
             }
+            AppAction::DeleteSelection => {}
         }
 
         Ok(false)
@@ -299,12 +301,21 @@ enum AppMode {
 struct StartupMenuState {
     selected: usize,
     has_valid_save: bool,
+    has_any_save: bool,
     message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveBrowserMode {
+    Load,
+    Delete,
 }
 
 struct SaveBrowserState {
     selected: usize,
     entries: Vec<session_persistence::SaveListEntry>,
+    mode: SaveBrowserMode,
+    confirm_delete: bool,
     message: Option<String>,
 }
 
@@ -320,15 +331,70 @@ impl AppState {
         StartupMenuState {
             selected: 0,
             has_valid_save: session_persistence::latest_valid_save(&entries).is_some(),
+            has_any_save: !entries.is_empty(),
             message,
         }
     }
 
-    fn save_browser(message: Option<String>) -> SaveBrowserState {
+    fn save_browser(mode: SaveBrowserMode, message: Option<String>) -> SaveBrowserState {
         SaveBrowserState {
             selected: 0,
             entries: session_persistence::list_save_entries().unwrap_or_default(),
+            mode,
+            confirm_delete: false,
             message,
+        }
+    }
+
+    fn refresh_browser_entries(browser: &mut SaveBrowserState) {
+        browser.entries = session_persistence::list_save_entries().unwrap_or_default();
+        if browser.entries.is_empty() {
+            browser.selected = 0;
+        } else {
+            browser.selected = browser
+                .selected
+                .min(browser.entries.len().saturating_sub(1));
+        }
+    }
+
+    fn request_browser_delete(browser: &mut SaveBrowserState) {
+        let Some(entry) = browser.entries.get(browser.selected) else {
+            browser.message = Some("No saves available".to_string());
+            browser.confirm_delete = false;
+            return;
+        };
+
+        if !browser.confirm_delete {
+            browser.confirm_delete = true;
+            browser.message = Some(format!(
+                "Press delete again to remove session {}\nJSON: {}\nCSV: matching session history file",
+                entry.label,
+                abbreviate_path_for_flash(&entry.path, 72),
+            ));
+            return;
+        }
+
+        match session_persistence::delete_save(&entry.path) {
+            Ok(deleted) => {
+                let mut message = format!(
+                    "Deleted session {}\nJSON: {}",
+                    entry.label,
+                    abbreviate_path_for_flash(&deleted.session_path, 72),
+                );
+                if let Some(csv_path) = deleted.history_csv_path {
+                    message.push_str(&format!(
+                        "\nCSV: {}",
+                        abbreviate_path_for_flash(&csv_path, 72)
+                    ));
+                }
+                browser.message = Some(message);
+                browser.confirm_delete = false;
+                Self::refresh_browser_entries(browser);
+            }
+            Err(err) => {
+                browser.message = Some(format!("Delete failed: {err}"));
+                browser.confirm_delete = false;
+            }
         }
     }
 
@@ -403,86 +469,99 @@ impl AppState {
                 self.mode = AppMode::Running(session);
                 Ok(false)
             }
-            AppMode::Startup(mut menu) => {
-                match action {
-                    AppAction::IncreaseDiversity => {
-                        menu.selected = menu.selected.saturating_sub(1);
-                        self.mode = AppMode::Startup(menu);
-                        Ok(false)
-                    }
-                    AppAction::DecreaseDiversity => {
-                        menu.selected = (menu.selected + 1).min(3);
-                        self.mode = AppMode::Startup(menu);
-                        Ok(false)
-                    }
-                    AppAction::Confirm => match menu.selected {
-                        0 => {
-                            self.mode = AppMode::Running(SessionState::new());
-                            Ok(false)
-                        }
-                        1 => {
-                            let entries = session_persistence::list_save_entries().unwrap_or_default();
-                            if let Some(entry) = session_persistence::latest_valid_save(&entries) {
-                                match session_persistence::load_session(&entry.path) {
-                                    Ok(session) => self.mode = AppMode::Running(session),
-                                    Err(err) => {
-                                        menu.message = Some(format!("Load failed: {err}"));
-                                        self.mode = AppMode::Startup(menu);
-                                    }
-                                }
-                            } else {
-                                menu.message = Some("No valid saves found".to_string());
-                                self.mode = AppMode::Startup(menu);
-                            }
-                            Ok(false)
-                        }
-                        2 => {
-                            self.mode = AppMode::SaveBrowser(Self::save_browser(None));
-                            Ok(false)
-                        }
-                        _ => Ok(true),
-                    },
-                    AppAction::Quit => Ok(true),
-                    _ => {
-                        self.mode = AppMode::Startup(menu);
-                        Ok(false)
-                    }
+            AppMode::Startup(mut menu) => match action {
+                AppAction::IncreaseDiversity => {
+                    menu.selected = menu.selected.saturating_sub(1);
+                    self.mode = AppMode::Startup(menu);
+                    Ok(false)
                 }
-            }
+                AppAction::DecreaseDiversity => {
+                    menu.selected = (menu.selected + 1).min(4);
+                    self.mode = AppMode::Startup(menu);
+                    Ok(false)
+                }
+                AppAction::Confirm => match menu.selected {
+                    0 => {
+                        self.mode = AppMode::Running(SessionState::new());
+                        Ok(false)
+                    }
+                    1 => {
+                        let entries = session_persistence::list_save_entries().unwrap_or_default();
+                        if let Some(entry) = session_persistence::latest_valid_save(&entries) {
+                            match session_persistence::load_session(&entry.path) {
+                                Ok(session) => self.mode = AppMode::Running(session),
+                                Err(err) => {
+                                    menu.message = Some(format!("Load failed: {err}"));
+                                    self.mode = AppMode::Startup(menu);
+                                }
+                            }
+                        } else {
+                            menu.message = Some("No valid saves found".to_string());
+                            self.mode = AppMode::Startup(menu);
+                        }
+                        Ok(false)
+                    }
+                    2 => {
+                        self.mode =
+                            AppMode::SaveBrowser(Self::save_browser(SaveBrowserMode::Load, None));
+                        Ok(false)
+                    }
+                    3 => {
+                        self.mode =
+                            AppMode::SaveBrowser(Self::save_browser(SaveBrowserMode::Delete, None));
+                        Ok(false)
+                    }
+                    _ => Ok(true),
+                },
+                AppAction::Quit => Ok(true),
+                _ => {
+                    self.mode = AppMode::Startup(menu);
+                    Ok(false)
+                }
+            },
             AppMode::SaveBrowser(mut browser) => {
                 match action {
                     AppAction::IncreaseDiversity => {
                         browser.selected = browser.selected.saturating_sub(1);
+                        browser.confirm_delete = false;
                     }
                     AppAction::DecreaseDiversity => {
                         if !browser.entries.is_empty() {
                             browser.selected =
                                 (browser.selected + 1).min(browser.entries.len().saturating_sub(1));
                         }
+                        browser.confirm_delete = false;
                     }
                     AppAction::Confirm => {
-                        let Some(entry) = browser.entries.get(browser.selected) else {
-                            browser.message = Some("No saves available".to_string());
-                            self.mode = AppMode::SaveBrowser(browser);
-                            return Ok(false);
-                        };
-                        match &entry.preview {
-                            Ok(_) => match session_persistence::load_session(&entry.path) {
-                                Ok(session) => {
-                                    self.mode = AppMode::Running(session);
-                                    return Ok(false);
-                                }
+                        if browser.mode == SaveBrowserMode::Delete {
+                            Self::request_browser_delete(&mut browser);
+                        } else {
+                            let Some(entry) = browser.entries.get(browser.selected) else {
+                                browser.message = Some("No saves available".to_string());
+                                self.mode = AppMode::SaveBrowser(browser);
+                                return Ok(false);
+                            };
+                            match &entry.preview {
+                                Ok(_) => match session_persistence::load_session(&entry.path) {
+                                    Ok(session) => {
+                                        self.mode = AppMode::Running(session);
+                                        return Ok(false);
+                                    }
+                                    Err(err) => {
+                                        browser.message = Some(format!("Load failed: {err}"));
+                                    }
+                                },
                                 Err(err) => {
-                                    browser.message = Some(format!("Load failed: {err}"));
+                                    browser.message = Some(format!("Save is not loadable: {err}"));
                                 }
-                            },
-                            Err(err) => {
-                                browser.message =
-                                    Some(format!("Save is not loadable: {err}"));
                             }
                         }
                     }
+                    AppAction::DeleteSelection => {
+                        Self::request_browser_delete(&mut browser);
+                    }
                     AppAction::Quit => {
+                        browser.confirm_delete = false;
                         self.mode = AppMode::Startup(Self::startup_menu(browser.message.take()));
                         return Ok(false);
                     }
@@ -559,7 +638,7 @@ fn print_help() {
     println!("            and automatic font scaling on resize");
     println!();
     println!("Startup menu:");
-    println!("  New Simulation | Continue Latest Save | Load Save... | Quit");
+    println!("  New Simulation | Continue Latest Save | Load Save... | Delete Save... | Quit");
     println!("In-run save/export:");
     println!("  s = save session, e = export daily history CSV");
 }
@@ -655,6 +734,7 @@ fn poll_terminal_action() -> io::Result<Option<AppAction>> {
     let action = match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Some(AppAction::Quit),
         KeyCode::Enter => Some(AppAction::Confirm),
+        KeyCode::Delete | KeyCode::Backspace => Some(AppAction::DeleteSelection),
         KeyCode::Char(' ') => Some(AppAction::TogglePause),
         KeyCode::Right => Some(AppAction::IncreaseSpeed),
         KeyCode::Left => Some(AppAction::DecreaseSpeed),
@@ -679,8 +759,11 @@ fn poll_terminal_action() -> io::Result<Option<AppAction>> {
 }
 
 fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width).max(40);
-    let height = height.min(area.height).max(10);
+    if area.width == 0 || area.height == 0 {
+        return area;
+    }
+    let width = width.min(area.width).max(1);
+    let height = height.min(area.height).max(1);
     Rect::new(
         area.x + area.width.saturating_sub(width) / 2,
         area.y + area.height.saturating_sub(height) / 2,
@@ -689,136 +772,495 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     )
 }
 
-fn render_startup_menu(frame: &mut ratatui::Frame, menu: &StartupMenuState) {
-    let area = centered_rect(frame.area(), 56, 14);
-    let items = [
-        ("New Simulation", true),
-        ("Continue Latest Save", menu.has_valid_save),
-        ("Load Save...", true),
-        ("Quit", true),
-    ];
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "TuiQuarium",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            format!("Version {}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::raw("")),
-    ];
+#[derive(Clone, Copy)]
+struct StartupMenuItem {
+    label: &'static str,
+    enabled: bool,
+    destructive: bool,
+}
 
-    for (index, (label, enabled)) in items.iter().enumerate() {
-        let mut style = if *enabled {
-            Style::default().fg(Color::White)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let prefix = if index == menu.selected { ">" } else { " " };
-        if index == menu.selected {
-            style = if *enabled {
-                style.add_modifier(Modifier::BOLD).fg(Color::Yellow)
-            } else {
-                style.add_modifier(Modifier::DIM)
-            };
-        }
-        lines.push(Line::from(Span::styled(format!(" {prefix} {label}"), style)));
+#[derive(Clone, Copy)]
+struct MenuPalette {
+    mid_water_bg: Color,
+    deep_water_bg: Color,
+    substrate_bg: Color,
+    bubble_fg: Color,
+    reed_fg: Color,
+    substrate_fg: Color,
+    panel_bg: Color,
+    panel_border: Color,
+    panel_shadow: Color,
+    header_bg: Color,
+    title_fg: Color,
+    subtitle_fg: Color,
+    text_fg: Color,
+    muted_fg: Color,
+    selected_bg: Color,
+    selected_fg: Color,
+    delete_bg: Color,
+    delete_fg: Color,
+    warning_bg: Color,
+    warning_fg: Color,
+    success_bg: Color,
+    success_fg: Color,
+    invalid_fg: Color,
+}
+
+fn menu_palette() -> MenuPalette {
+    MenuPalette {
+        mid_water_bg: Color::Rgb(0, 20, 50),
+        deep_water_bg: Color::Rgb(35, 30, 20),
+        substrate_bg: Color::Rgb(60, 45, 15),
+        bubble_fg: Color::Blue,
+        reed_fg: Color::DarkGray,
+        substrate_fg: Color::Yellow,
+        panel_bg: Color::Rgb(8, 18, 26),
+        panel_border: Color::Rgb(126, 194, 206),
+        panel_shadow: Color::Rgb(1, 6, 10),
+        header_bg: Color::Rgb(14, 42, 58),
+        title_fg: Color::Rgb(240, 250, 252),
+        subtitle_fg: Color::Rgb(178, 214, 220),
+        text_fg: Color::Rgb(224, 232, 236),
+        muted_fg: Color::Rgb(134, 160, 170),
+        selected_bg: Color::Rgb(26, 78, 92),
+        selected_fg: Color::Rgb(250, 252, 252),
+        delete_bg: Color::Rgb(84, 42, 28),
+        delete_fg: Color::Rgb(252, 216, 188),
+        warning_bg: Color::Rgb(84, 42, 28),
+        warning_fg: Color::Rgb(255, 232, 196),
+        success_bg: Color::Rgb(18, 62, 62),
+        success_fg: Color::Rgb(204, 246, 240),
+        invalid_fg: Color::Rgb(246, 156, 148),
+    }
+}
+
+fn startup_menu_items(has_valid_save: bool, has_any_save: bool) -> [StartupMenuItem; 5] {
+    [
+        StartupMenuItem {
+            label: "New Simulation",
+            enabled: true,
+            destructive: false,
+        },
+        StartupMenuItem {
+            label: "Continue Latest Save",
+            enabled: has_valid_save,
+            destructive: false,
+        },
+        StartupMenuItem {
+            label: "Load Save...",
+            enabled: true,
+            destructive: false,
+        },
+        StartupMenuItem {
+            label: "Delete Save...",
+            enabled: has_any_save,
+            destructive: true,
+        },
+        StartupMenuItem {
+            label: "Quit",
+            enabled: true,
+            destructive: false,
+        },
+    ]
+}
+
+fn startup_selection_hint(selected: usize) -> &'static str {
+    match selected {
+        0 => "Start a fresh lake from founder plants and fauna.",
+        1 => "Resume the newest valid save and continue the same session id.",
+        2 => "Browse existing sessions and load one into the simulation shell.",
+        3 => "Delete a saved session and its matching ecology-history CSV export.",
+        _ => "Exit the application without changing simulation files.",
+    }
+}
+
+fn fit_text_to_width(text: &str, width: u16) -> String {
+    let width = width as usize;
+    if width == 0 {
+        return String::new();
     }
 
-    lines.push(Line::from(Span::raw("")));
-    lines.push(Line::from(Span::styled(
-        "Up/Down: Move  Enter: Select  Esc: Quit",
-        Style::default().fg(Color::DarkGray),
-    )));
+    let count = text.chars().count();
+    if count <= width {
+        let mut result = String::with_capacity(width);
+        result.push_str(text);
+        result.push_str(&" ".repeat(width - count));
+        return result;
+    }
 
-    if let Some(message) = &menu.message {
-        lines.push(Line::from(Span::raw("")));
+    if width <= 3 {
+        return text.chars().take(width).collect();
+    }
+
+    let mut result: String = text.chars().take(width - 3).collect();
+    result.push_str("...");
+    result
+}
+
+fn full_width_line(text: &str, width: u16, style: Style) -> Line<'static> {
+    Line::from(Span::styled(fit_text_to_width(text, width), style))
+}
+
+fn blank_line(width: u16, bg: Color) -> Line<'static> {
+    full_width_line("", width, Style::default().bg(bg))
+}
+
+fn message_lines(message: &str, width: u16, style: Style) -> Vec<Line<'static>> {
+    message
+        .lines()
+        .map(|line| full_width_line(line, width, style))
+        .collect()
+}
+
+fn shadow_rect(area: Rect, frame_area: Rect) -> Rect {
+    let max_width = frame_area
+        .width
+        .saturating_sub(area.x.saturating_sub(frame_area.x));
+    let max_height = frame_area
+        .height
+        .saturating_sub(area.y.saturating_sub(frame_area.y));
+    Rect::new(
+        area.x
+            .saturating_add(2)
+            .min(frame_area.right().saturating_sub(1)),
+        area.y
+            .saturating_add(1)
+            .min(frame_area.bottom().saturating_sub(1)),
+        area.width.min(max_width.saturating_sub(2)),
+        area.height.min(max_height.saturating_sub(1)),
+    )
+}
+
+fn render_menu_background(frame: &mut ratatui::Frame) {
+    let area = frame.area();
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let pal = menu_palette();
+    let substrate_height = area.height.min(2);
+    let water_height = area.height.saturating_sub(substrate_height);
+    let mut lines = Vec::with_capacity(area.height as usize);
+
+    for y in 0..area.height {
+        let mut row = String::with_capacity(area.width as usize);
+        for x in 0..area.width {
+            let ch = if y < water_height {
+                if ((x as usize) + (y as usize)) % 4 == 0
+                    || ((x as usize) + (y as usize)) % 4 == 2
+                {
+                    '~'
+                } else {
+                    ' '
+                }
+            } else if y == water_height {
+                match ((x as usize) * 7 + (y as usize) * 3) % 5 {
+                    0 | 2 => ':',
+                    1 | 3 => '.',
+                    _ => ' ',
+                }
+            } else {
+                match ((x as usize) * 3 + (y as usize) * 7) % 3 {
+                    0 | 2 => ':',
+                    _ => '.',
+                }
+            };
+            row.push(ch);
+        }
+
+        let (fg, bg) = if y < water_height {
+            (pal.bubble_fg, pal.mid_water_bg)
+        } else if y == water_height {
+            (pal.reed_fg, pal.deep_water_bg)
+        } else {
+            (pal.substrate_fg, pal.substrate_bg)
+        };
+
         lines.push(Line::from(Span::styled(
-            message.clone(),
-            Style::default().fg(Color::LightRed),
+            row,
+            Style::default().fg(fg).bg(bg),
         )));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Startup"))
-        .alignment(Alignment::Left);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(Style::default().bg(pal.mid_water_bg))
+            .alignment(Alignment::Left),
+        area,
+    );
+}
+
+fn render_menu_panel(frame: &mut ratatui::Frame, area: Rect, title: &str, subtitle: &str) -> Rect {
+    let pal = menu_palette();
+    let frame_area = frame.area();
+    let shadow = shadow_rect(area, frame_area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(pal.panel_shadow)),
+        shadow,
+    );
+
     frame.render_widget(Clear, area);
-    frame.render_widget(paragraph, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(pal.panel_border))
+        .style(Style::default().bg(pal.panel_bg).fg(pal.text_fg));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return inner;
+    }
+
+    frame.render_widget(
+        Block::default().style(Style::default().bg(pal.panel_bg)),
+        inner,
+    );
+    if inner.width < 4 || inner.height < 4 {
+        return inner;
+    }
+
+    let header_height = inner.height.min(3);
+    let header = Rect::new(inner.x, inner.y, inner.width, header_height);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(pal.header_bg)),
+        header,
+    );
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                title.to_string(),
+                Style::default()
+                    .fg(pal.title_fg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                subtitle.to_string(),
+                Style::default().fg(pal.subtitle_fg),
+            )),
+        ])
+        .alignment(Alignment::Center)
+        .style(Style::default().bg(pal.header_bg)),
+        header,
+    );
+
+    let divider_y = header.y.saturating_add(header.height);
+    if divider_y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(full_width_line(
+                "────────────────────────────────",
+                inner.width,
+                Style::default().bg(pal.panel_bg).fg(pal.panel_border),
+            )),
+            Rect::new(inner.x, divider_y, inner.width, 1),
+        );
+    }
+
+    let body_top = divider_y.saturating_add(1);
+    let body_height = inner.bottom().saturating_sub(body_top);
+    Rect::new(
+        inner.x.saturating_add(1),
+        body_top,
+        inner.width.saturating_sub(2),
+        body_height.saturating_sub(1),
+    )
+}
+
+fn render_startup_menu(frame: &mut ratatui::Frame, menu: &StartupMenuState) {
+    let pal = menu_palette();
+    render_menu_background(frame);
+    let area = centered_rect(frame.area(), 70, 20);
+    let title = format!("TuiQuarium {}", env!("CARGO_PKG_VERSION"));
+    let inner = render_menu_panel(
+        frame,
+        area,
+        &title,
+        "Lake session control and analysis workspace",
+    );
+    let width = inner.width;
+    let mut lines = vec![blank_line(width, pal.panel_bg)];
+
+    for (index, item) in startup_menu_items(menu.has_valid_save, menu.has_any_save)
+        .iter()
+        .enumerate()
+    {
+        let selected = index == menu.selected;
+        let prefix = if selected { ">" } else { " " };
+        let style = if !item.enabled {
+            Style::default().fg(pal.muted_fg).bg(pal.panel_bg)
+        } else if item.destructive && selected {
+            Style::default()
+                .fg(pal.delete_fg)
+                .bg(pal.delete_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if selected {
+            Style::default()
+                .fg(pal.selected_fg)
+                .bg(pal.selected_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if item.destructive {
+            Style::default().fg(pal.delete_fg).bg(pal.panel_bg)
+        } else {
+            Style::default().fg(pal.text_fg).bg(pal.panel_bg)
+        };
+        let suffix = if !item.enabled { " (unavailable)" } else { "" };
+        lines.push(full_width_line(
+            &format!(" {prefix} {}{suffix}", item.label),
+            width,
+            style,
+        ));
+    }
+
+    lines.push(blank_line(width, pal.panel_bg));
+    lines.push(full_width_line(
+        startup_selection_hint(menu.selected),
+        width,
+        Style::default()
+            .fg(pal.subtitle_fg)
+            .bg(Color::Rgb(11, 34, 44)),
+    ));
+    lines.push(blank_line(width, pal.panel_bg));
+    lines.push(full_width_line(
+        "Up/Down Move   Enter Select   Esc Quit",
+        width,
+        Style::default().fg(pal.muted_fg).bg(pal.panel_bg),
+    ));
+
+    if let Some(message) = &menu.message {
+        lines.push(blank_line(width, pal.panel_bg));
+        lines.extend(message_lines(
+            message,
+            width,
+            Style::default()
+                .fg(pal.warning_fg)
+                .bg(pal.warning_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), inner);
 }
 
 fn render_save_browser(frame: &mut ratatui::Frame, browser: &SaveBrowserState) {
-    let area = centered_rect(frame.area(), 88, 22);
+    let pal = menu_palette();
+    render_menu_background(frame);
+    let area = centered_rect(frame.area(), 96, 24);
+    let (heading, subtitle, hint) = match browser.mode {
+        SaveBrowserMode::Load => (
+            "Saved Sessions",
+            "Load a saved lake and continue the same session lineage",
+            "Up/Down Move   Enter Load   Del/Backspace Delete   Esc Back",
+        ),
+        SaveBrowserMode::Delete => (
+            "Delete Sessions",
+            "Remove a session JSON and its matching ecology-history CSV",
+            "Up/Down Move   Enter Delete   Del/Backspace Delete   Esc Back",
+        ),
+    };
+    let inner = render_menu_panel(frame, area, heading, subtitle);
+    let width = inner.width;
     let mut lines = vec![
-        Line::from(Span::styled(
-            "Load Saved Session",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "Up/Down: Move  Enter: Load  Esc: Back",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::raw("")),
+        full_width_line(
+            hint,
+            width,
+            Style::default().fg(pal.muted_fg).bg(pal.panel_bg),
+        ),
+        blank_line(width, pal.panel_bg),
     ];
 
     if browser.entries.is_empty() {
-        lines.push(Line::from(Span::styled(
+        lines.push(full_width_line(
             "No save files found in ~/.tuiquarium/saves/",
-            Style::default().fg(Color::DarkGray),
-        )));
+            width,
+            Style::default().fg(pal.muted_fg).bg(pal.panel_bg),
+        ));
     } else {
         for (index, entry) in browser.entries.iter().enumerate() {
             let selected = index == browser.selected;
-            let prefix = if selected { ">" } else { " " };
-            let style = if selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+            let (top_style, detail_style) = if matches!(&entry.preview, Err(_)) {
+                (
+                    Style::default().fg(pal.invalid_fg).bg(pal.panel_bg),
+                    Style::default().fg(pal.invalid_fg).bg(pal.panel_bg),
+                )
+            } else if selected && browser.mode == SaveBrowserMode::Delete {
+                (
+                    Style::default()
+                        .fg(pal.delete_fg)
+                        .bg(pal.delete_bg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.delete_fg).bg(pal.delete_bg),
+                )
+            } else if selected {
+                (
+                    Style::default()
+                        .fg(pal.selected_fg)
+                        .bg(pal.selected_bg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(pal.selected_fg).bg(pal.selected_bg),
+                )
             } else {
-                Style::default().fg(Color::White)
+                (
+                    Style::default().fg(pal.text_fg).bg(pal.panel_bg),
+                    Style::default().fg(pal.muted_fg).bg(pal.panel_bg),
+                )
             };
-            lines.push(Line::from(Span::styled(
-                format!(" {prefix} {}", entry.label),
-                style,
-            )));
-            match &entry.preview {
-                Ok(preview) => lines.push(Line::from(Span::styled(
-                    format!(
-                        "    Day {} | Pop {} | Sp {} | Prod {:.1} | {} | {}",
-                        preview.summary.day,
-                        preview.summary.creature_count,
-                        preview.summary.species_count,
-                        preview.summary.producer_biomass,
-                        preview.app_version,
-                        entry.saved_at_unix_secs
-                    ),
-                    Style::default().fg(Color::Gray),
-                ))),
-                Err(err) => lines.push(Line::from(Span::styled(
-                    format!("    Invalid save: {err}"),
-                    Style::default().fg(Color::LightRed),
-                ))),
-            }
+            let prefix = if selected { ">" } else { " " };
+            lines.push(full_width_line(
+                &format!(" {prefix} Session {}", entry.label),
+                width,
+                top_style,
+            ));
+
+            let detail = match &entry.preview {
+                Ok(preview) => format!(
+                    "   Day {}  |  Pop {}  |  Sp {}  |  Prod {:.1}  |  v{}  |  unix {}",
+                    preview.summary.day,
+                    preview.summary.creature_count,
+                    preview.summary.species_count,
+                    preview.summary.producer_biomass,
+                    preview.app_version,
+                    entry.saved_at_unix_secs
+                ),
+                Err(err) => format!("   Invalid save: {err}"),
+            };
+            lines.push(full_width_line(&detail, width, detail_style));
         }
     }
 
-    if let Some(message) = &browser.message {
-        lines.push(Line::from(Span::raw("")));
-        lines.push(Line::from(Span::styled(
-            message.clone(),
-            Style::default().fg(Color::LightRed),
-        )));
+    if browser.confirm_delete {
+        lines.push(blank_line(width, pal.panel_bg));
+        lines.push(full_width_line(
+            "Delete is armed for the selected session. Press delete again to confirm.",
+            width,
+            Style::default()
+                .fg(pal.warning_fg)
+                .bg(pal.warning_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("Saves"))
-        .alignment(Alignment::Left);
-    frame.render_widget(Clear, area);
-    frame.render_widget(paragraph, area);
+    if let Some(message) = &browser.message {
+        lines.push(blank_line(width, pal.panel_bg));
+        let message_style = if message.starts_with("Deleted") {
+            Style::default()
+                .fg(pal.success_fg)
+                .bg(pal.success_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if message.starts_with("Delete failed")
+            || message.starts_with("Load failed")
+            || message.starts_with("Save is not loadable")
+            || message.starts_with("Press delete again")
+        {
+            Style::default()
+                .fg(pal.warning_fg)
+                .bg(pal.warning_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(pal.text_fg).bg(pal.panel_bg)
+        };
+        lines.extend(message_lines(message, width, message_style));
+    }
+
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), inner);
 }
 
 #[cfg(test)]
@@ -856,5 +1298,27 @@ mod tests {
     fn test_decrease_sim_speed_clamps_at_minimum() {
         assert_eq!(decrease_sim_speed(MIN_SIM_SPEED + 0.25), MIN_SIM_SPEED);
         assert_eq!(decrease_sim_speed(MIN_SIM_SPEED), MIN_SIM_SPEED);
+    }
+
+    #[test]
+    fn test_startup_menu_items_include_delete_entry() {
+        let items = startup_menu_items(false, false);
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[3].label, "Delete Save...");
+        assert!(!items[1].enabled);
+        assert!(!items[3].enabled);
+        assert!(items[3].destructive);
+    }
+
+    #[test]
+    fn test_centered_rect_handles_tiny_terminal() {
+        assert_eq!(
+            centered_rect(Rect::new(0, 0, 2, 1), 64, 18),
+            Rect::new(0, 0, 2, 1)
+        );
+        assert_eq!(
+            centered_rect(Rect::new(0, 0, 0, 0), 64, 18),
+            Rect::new(0, 0, 0, 0)
+        );
     }
 }

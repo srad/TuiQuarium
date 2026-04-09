@@ -4,6 +4,60 @@ use crate::stats::DailyEcologySample;
 
 const DIM: usize = 7;
 const MIN_STATE: f64 = 1e-9;
+const REFERENCE_TANK_AREA: f64 = 48.0 * 16.0;
+const REFERENCE_STARTUP_MACROPHYTE_BIOMASS: f64 = 48.0;
+const REFERENCE_PRODUCER_DENSITY_PER_1000_CELLS: f64 = 12.0;
+const REFERENCE_FOUNDER_BODY_MASS: f64 = 0.90;
+const REFERENCE_ADULT_BODY_MASS: f64 = 0.42;
+const SOFT_CAP_HEADROOM: f64 = 1.8;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EquilibriumStartupTargets {
+    pub dissolved_n: f32,
+    pub dissolved_p: f32,
+    pub sediment_n: f32,
+    pub sediment_p: f32,
+    pub phytoplankton_load: f32,
+    pub target_macrophyte_biomass: f32,
+    pub target_consumer_biomass: f32,
+    pub target_detritus_energy: f32,
+    pub target_producer_count: usize,
+    pub target_consumer_founders: usize,
+    pub soft_population_cap: usize,
+    pub consumer_to_macrophyte_ratio: f32,
+    pub detritus_to_macrophyte_ratio: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeNutrientTargets {
+    pub dissolved_n_target: f32,
+    pub dissolved_p_target: f32,
+    pub sediment_n_target: f32,
+    pub sediment_p_target: f32,
+    pub phytoplankton_target: f32,
+    pub dissolved_n_upper: f32,
+    pub dissolved_p_upper: f32,
+}
+
+impl EquilibriumStartupTargets {
+    pub fn consumer_biomass_for_macrophytes(self, macrophyte_biomass: f32) -> f32 {
+        macrophyte_biomass.max(0.0) * self.consumer_to_macrophyte_ratio
+    }
+
+    pub fn detritus_energy_for_macrophytes(self, macrophyte_biomass: f32) -> f32 {
+        macrophyte_biomass.max(0.0) * self.detritus_to_macrophyte_ratio
+    }
+
+    pub fn observable_metrics(self) -> ObservableLakeMetrics {
+        ObservableLakeMetrics {
+            consumer_to_macrophyte_ratio: self.consumer_to_macrophyte_ratio as f64,
+            detritus_to_macrophyte_ratio: self.detritus_to_macrophyte_ratio as f64,
+            dissolved_n: self.dissolved_n as f64,
+            dissolved_p: self.dissolved_p as f64,
+            phytoplankton_load: self.phytoplankton_load as f64,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReducedState {
@@ -173,6 +227,74 @@ pub struct ReducedEquilibriumModel {
 }
 
 impl ReducedEquilibriumModel {
+    pub fn default_runtime_nutrient_targets() -> RuntimeNutrientTargets {
+        let (model, state) = Self::reference_clearwater();
+        let dissolved_n_target = state.n as f32;
+        let dissolved_p_target = state.p as f32;
+        let sediment_n_target = model.s_n_star(state) as f32;
+        let sediment_p_target = model.s_p_star(state) as f32;
+        let nutrient_pressure = ((state.n / 95.0) + (state.p / 18.0)) * 0.5;
+        let phytoplankton_target = (0.015 + nutrient_pressure.clamp(0.0, 1.0) * 0.22) as f32;
+
+        RuntimeNutrientTargets {
+            dissolved_n_target,
+            dissolved_p_target,
+            sediment_n_target,
+            sediment_p_target,
+            phytoplankton_target,
+            dissolved_n_upper: (dissolved_n_target * 2.2).max(12.0),
+            dissolved_p_upper: (dissolved_p_target * 2.5).max(2.4),
+        }
+    }
+
+    pub fn default_startup_targets(tank_width: u16, tank_height: u16) -> EquilibriumStartupTargets {
+        let (model, state) = Self::reference_clearwater();
+        let area = (tank_width.max(1) as f64) * (tank_height.max(1) as f64);
+        let area_scale = (area / REFERENCE_TANK_AREA).max(0.25);
+        let reference_metrics = model.reference_observable_metrics(state);
+        let dissolved_n = state.n as f32;
+        let dissolved_p = state.p as f32;
+        let sediment_n = model.s_n_star(state) as f32;
+        let sediment_p = model.s_p_star(state) as f32;
+        let nutrient_pressure = ((state.n / 95.0) + (state.p / 18.0)) * 0.5;
+        let phytoplankton_load = (0.015 + nutrient_pressure.clamp(0.0, 1.0) * 0.22) as f32;
+        let target_macrophyte_biomass =
+            (REFERENCE_STARTUP_MACROPHYTE_BIOMASS * area_scale).max(18.0) as f32;
+        let consumer_to_macrophyte_ratio = reference_metrics.consumer_to_macrophyte_ratio as f32;
+        let detritus_to_macrophyte_ratio = reference_metrics.detritus_to_macrophyte_ratio as f32;
+        let target_consumer_biomass =
+            target_macrophyte_biomass * consumer_to_macrophyte_ratio.max(0.01);
+        let target_detritus_energy =
+            target_macrophyte_biomass * detritus_to_macrophyte_ratio.max(0.02);
+        let target_producer_count = ((area / 1000.0) * REFERENCE_PRODUCER_DENSITY_PER_1000_CELLS)
+            .round()
+            .clamp(12.0, ((area / 60.0).round()).max(20.0)) as usize;
+        let target_consumer_founders = (target_consumer_biomass as f64
+            / REFERENCE_FOUNDER_BODY_MASS)
+            .round()
+            .clamp(4.0, 24.0) as usize;
+        let soft_population_cap = ((target_consumer_biomass as f64 / REFERENCE_ADULT_BODY_MASS)
+            * SOFT_CAP_HEADROOM)
+            .round()
+            .clamp((target_consumer_founders.max(8) * 2) as f64, 110.0) as usize;
+
+        EquilibriumStartupTargets {
+            dissolved_n,
+            dissolved_p,
+            sediment_n,
+            sediment_p,
+            phytoplankton_load,
+            target_macrophyte_biomass,
+            target_consumer_biomass,
+            target_detritus_energy,
+            target_producer_count,
+            target_consumer_founders,
+            soft_population_cap,
+            consumer_to_macrophyte_ratio,
+            detritus_to_macrophyte_ratio,
+        }
+    }
+
     pub fn reference_clearwater() -> (Self, ReducedState) {
         let target = ReducedState::new(6.0, 1.4, 0.8, 0.45, 0.24, 5.2, 0.9);
         let mut model = Self {
@@ -732,6 +854,49 @@ mod tests {
         assert!(
             model.observable_metrics_in_default_realism_band(metrics),
             "Reference observable metrics should sit inside the clear-water realism band: {metrics:?}"
+        );
+    }
+
+    #[test]
+    fn default_startup_targets_scale_with_tank_area() {
+        let small = ReducedEquilibriumModel::default_startup_targets(48, 16);
+        let large = ReducedEquilibriumModel::default_startup_targets(80, 24);
+
+        assert!(large.target_macrophyte_biomass > small.target_macrophyte_biomass);
+        assert!(large.target_consumer_biomass > small.target_consumer_biomass);
+        assert!(large.target_detritus_energy > small.target_detritus_energy);
+        assert!(large.target_producer_count > small.target_producer_count);
+        assert!(large.target_consumer_founders > small.target_consumer_founders);
+        assert!(large.soft_population_cap > small.soft_population_cap);
+        assert!((large.dissolved_n - small.dissolved_n).abs() < f32::EPSILON);
+        assert!((large.dissolved_p - small.dissolved_p).abs() < f32::EPSILON);
+        assert!((large.phytoplankton_load - small.phytoplankton_load).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn default_startup_targets_match_clearwater_observable_band() {
+        let targets = ReducedEquilibriumModel::default_startup_targets(48, 16);
+        let (model, reference_state) = ReducedEquilibriumModel::reference_clearwater();
+        let startup_metrics = targets.observable_metrics();
+        let reference_metrics = model.reference_observable_metrics(reference_state);
+
+        assert!(
+            model.observable_metrics_in_default_realism_band(startup_metrics),
+            "Default startup targets should stay inside the clear-water realism band: {startup_metrics:?}"
+        );
+        assert!(
+            (startup_metrics.consumer_to_macrophyte_ratio
+                - reference_metrics.consumer_to_macrophyte_ratio)
+                .abs()
+                < 1e-6,
+            "Startup consumer:macrophyte ratio should match the reduced-model reference"
+        );
+        assert!(
+            (startup_metrics.detritus_to_macrophyte_ratio
+                - reference_metrics.detritus_to_macrophyte_ratio)
+                .abs()
+                < 1e-6,
+            "Startup detritus:macrophyte ratio should match the reduced-model reference"
         );
     }
 }

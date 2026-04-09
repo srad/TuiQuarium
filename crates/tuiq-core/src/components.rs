@@ -154,6 +154,8 @@ pub struct RootedMacrophyte;
 pub struct ConsumerState {
     pub reserve_buffer: f32,
     pub maturity_progress: f32,
+    #[serde(default)]
+    pub matured_once: bool,
     pub reproductive_buffer: f32,
     pub brood_cooldown: f32,
     pub recent_assimilation: f32,
@@ -164,6 +166,7 @@ impl Default for ConsumerState {
         Self {
             reserve_buffer: 0.2,
             maturity_progress: 0.0,
+            matured_once: false,
             reproductive_buffer: 0.0,
             brood_cooldown: 0.0,
             recent_assimilation: 0.0,
@@ -173,7 +176,7 @@ impl Default for ConsumerState {
 
 impl ConsumerState {
     pub fn is_adult(&self) -> bool {
-        self.maturity_progress >= 1.0
+        self.matured_once || self.maturity_progress >= 1.0
     }
 }
 
